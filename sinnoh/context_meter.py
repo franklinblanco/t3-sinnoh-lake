@@ -1,10 +1,12 @@
 """Publish per-thread context percentages in the Sinnoh composer's theme CSS."""
 from collections import defaultdict
 import json
+from itertools import zip_longest
 from pathlib import Path
 import sqlite3
 
 from .paths import THEME_ID, atomic_write, t3_home
+from .remote_context import linked_readings, percentage
 
 START = "/* Sinnoh context meter */"
 END = "/* End Sinnoh context meter */"
@@ -71,34 +73,40 @@ def readings(root):
     """
     connection = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True, timeout=1)
     try:
-        return env, [(thread, min(100, (200 * used + maximum) // (2 * maximum)))
-                     for thread, used, maximum in connection.execute(sql)
-                     if type(used) is int and type(maximum) is int and used >= 0 and maximum > 0]
+        return env, [(env, thread, percent) for thread, used, maximum in connection.execute(sql)
+                     if (percent := percentage(used, maximum)) is not None]
     finally:
         connection.close()
 
 
-def meter_css(env, rows, budget):
-    # Group equal readings so each percentage needs only one pair of declarations.
-    # Match the sidebar's route-active row, or the conversation's own citation markup
-    # when the sidebar is collapsed. Environment IDs distinguish transferred threads.
+def meter_css(rows, budget):
+    # Prioritize recently active threads in every environment within T3's CSS limit.
+    by_environment = defaultdict(list)
+    for row in rows:
+        by_environment[row[0]].append(row)
     groups = defaultdict(list)
-    total = len(BASE) + len(START) + len(END) + 8
-    for thread, percent in rows:
-        sidebar = f'[data-sidebar-row={css_string(env + ":" + thread)}]'
-        citation = f'[data-assistant-citation-thread={css_string(thread)}]'
-        pair = (sidebar, citation)
-        cost = sum(len(s.encode()) + 1 for s in pair) + (260 if percent not in groups else 0)
-        if total + cost > budget:
-            break
-        total += cost
-        groups[percent].append(pair)
+    total = len((START + BASE + END + "\n" * 3).encode())
+    for batch in zip_longest(*by_environment.values()):
+        for row in batch:
+            if row is None:
+                continue
+            env, thread, percent = row
+            sidebar = f'[data-sidebar-row={css_string(env + ":" + thread)}]'
+            citation = f'[data-assistant-citation-thread={css_string(thread)}]'
+            prefix = ':root:has([aria-current]:not([aria-current="false"]):is('
+            middle = (f')),[data-chat-workspace-drop-target]:has('
+                      f'[data-assistant-citation-environment={css_string(env)}]:is(')
+            suffix = f')){{--sinnoh-fill:{percent}%;--sinnoh-tip:"{percent}% of context used";}}'
+            group = (prefix, middle, suffix)
+            overhead = len((''.join(group) + "\n").encode()) if group not in groups else 2
+            cost = len((sidebar + citation).encode()) + overhead
+            if total + cost <= budget:
+                groups[group].append((sidebar, citation))
+                total += cost
     blocks = [START, BASE]
-    for percent, selectors in sorted(groups.items()):
+    for (prefix, middle, suffix), selectors in sorted(groups.items()):
         sidebar, citations = (','.join(column) for column in zip(*sorted(selectors)))
-        blocks.append(f':root:has([aria-current]:not([aria-current="false"]):is({sidebar})),'
-                      f'[data-chat-workspace-drop-target]:has([data-assistant-citation-environment={css_string(env)}]:is({citations}))'
-                      f'{{--sinnoh-fill:{percent}%;--sinnoh-tip:"{percent}% of context used";}}')
+        blocks.append(prefix + sidebar + middle + citations + suffix)
     return '\n'.join([*blocks, END])
 
 
@@ -117,7 +125,8 @@ def sync(root=None):
         env, rows = readings(root)
     except (OSError, sqlite3.Error):
         return  # A busy or temporarily unavailable database should not clear the last reading.
-    result = base + "\n" + meter_css(env, rows, LIMIT - len(base.encode()) - 1)
+    rows.extend(linked_readings(root, env))
+    result = base + "\n" + meter_css(rows, LIMIT - len(base.encode()) - 1)
     if result != css and len(result.encode()) <= LIMIT:
         theme["css"] = result
         atomic_write(path, (json.dumps(theme, ensure_ascii=False, indent=2) + "\n").encode())
