@@ -3,6 +3,7 @@ import argparse
 from datetime import datetime, timedelta, timezone
 import logging
 import os
+import re
 from pathlib import Path
 import sys
 
@@ -46,9 +47,12 @@ def localized_reset(reset, now):
     value = QDateTime.fromMSecsSinceEpoch(int(reset.timestamp() * 1000))
     today = QDateTime.fromMSecsSinceEpoch(int(now.timestamp() * 1000))
     loc = QLocale.system()
+    short = QLocale.FormatType.ShortFormat
+    pattern = re.sub(r"([:. ]s{1,2})(?![A-Za-z])", "", loc.timeFormat(short))
+    time = loc.toString(value.time(), pattern)
     if value.date() == today.date():
-        return loc.toString(value.time(), QLocale.FormatType.ShortFormat)
-    return loc.toString(value, QLocale.FormatType.ShortFormat)
+        return time
+    return loc.toString(value.date(), short) + " " + time
 
 
 class Rocker(QPushButton):
@@ -234,7 +238,7 @@ def main():
     lock_dir.mkdir(parents=True, exist_ok=True)
     lock = QLockFile(str(lock_dir / "sinnoh-lake.lock"))
     lock.setStaleLockTime(0)
-    if not lock.tryLock():
+    if not lock.tryLock(0):
         logging.info("A Sinnoh Lake clock is already running for this T3 data directory.")
         return
     app = QCoreApplication([sys.argv[0]]) if args.clock_only else QApplication([sys.argv[0]])

@@ -1,7 +1,11 @@
 """Exercise the real Qt buttons and, on X11, EWMH foreground tracking."""
+import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import subprocess
+import sys
+import time
 import unittest
 
 from PySide6.QtCore import Qt
@@ -18,9 +22,6 @@ class PanelTest(unittest.TestCase):
         cls.app.setQuitOnLastWindowClosed(False)
 
     def test_clicks_tooltips_and_zero_remaining(self):
-        import json
-        import re
-
         with TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "userdata").mkdir()
@@ -52,8 +53,29 @@ class PanelTest(unittest.TestCase):
             QTest.mouseClick(panel.next, Qt.MouseButton.LeftButton)
             self.assertIn("Awaiting T3 data", panel.face.accessibleName())
             QTest.mouseClick(panel.previous, Qt.MouseButton.LeftButton)
-            self.assertRegex(panel.face.accessibleName(), re.compile(r"Week, 0% remaining"))
+            self.assertIn("Week, 0% remaining", panel.face.accessibleName())
             panel.close()
+
+    def test_clock_process_publishes_and_keeps_running(self):
+        with TemporaryDirectory() as temp:
+            themes = Path(temp) / "userdata" / "themes"
+            themes.mkdir(parents=True)
+            (themes / "sinnoh-lake-life.json").write_text("{}")
+            env = {**os.environ, "T3CODE_HOME": temp}
+            command = [sys.executable, "-m", "sinnoh.monitor", "--clock-only"]
+            with subprocess.Popen(command, env=env, stderr=subprocess.PIPE) as worker:
+                try:
+                    until = time.monotonic() + 12
+                    while time.monotonic() < until:
+                        if worker.poll() is not None:
+                            self.fail(worker.stderr.read().decode(errors="replace"))
+                        if (themes / "sinnoh-lake-life.webp").is_file():
+                            break
+                        time.sleep(0.1)
+                    self.assertTrue((themes / "sinnoh-lake-life.webp").is_file())
+                finally:
+                    if worker.poll() is None:
+                        worker.terminate()
 
     @unittest.skipUnless(os.environ.get("SINNOH_TEST_X11"), "requires an X11 display")
     def test_x11_foreground_position_and_visibility(self):

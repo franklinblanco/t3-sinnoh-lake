@@ -10,7 +10,7 @@ import sys
 from tempfile import TemporaryDirectory
 import venv
 
-from sinnoh.paths import ASSETS, THEME_ID, t3_home
+from sinnoh.paths import ASSETS, THEME_ID, atomic_write, t3_home
 
 REPO = Path(__file__).resolve().parent
 
@@ -24,18 +24,14 @@ def app_dir():
 
 
 def write_atomic(target, data):
-    if target.is_file() and target.read_bytes() == data:
+    if sys.platform != "win32" and target.is_file() and target.read_bytes() == data:
         return
-    target.parent.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(dir=target.parent, prefix=".sinnoh-") as temp:
-        staged = Path(temp) / target.name
-        staged.write_bytes(data)
-        os.replace(staged, target)
+    atomic_write(target, data)
 
 
 def copy_tree(source, dest):
     for path in source.rglob("*"):
-        if path.is_file() and path.suffix != ".pyc" and "__pycache__" not in path.parts:
+        if path.is_file() and path.suffix != ".pyc" and not path.name.startswith("."):
             write_atomic(dest / path.relative_to(source), path.read_bytes())
 
 
@@ -44,7 +40,10 @@ def install_theme(directory, root, python):
     for path in ASSETS.glob("sinnoh-rift.*"):
         write_atomic(themes / path.name, path.read_bytes())
     write_atomic(themes / f"{THEME_ID}.json", (ASSETS / f"{THEME_ID}.json").read_bytes())
-    subprocess.run([python, "-m", "sinnoh.solar"], cwd=directory, check=True)
+    command = [python, "-m", "sinnoh.solar"]
+    if sys.platform == "win32":
+        command.append("--force")
+    subprocess.run(command, cwd=directory, check=True)
 
 
 def select_theme(root):

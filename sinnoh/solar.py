@@ -2,18 +2,14 @@
 import filecmp
 from datetime import datetime, timedelta, timezone
 from importlib.resources import files
-import os
-from pathlib import Path
 import re
-import shutil
-from tempfile import TemporaryDirectory
 from zoneinfo import ZoneInfo
 
 from astral import Observer
 from astral.sun import elevation
 from tzlocal import reload_localzone
 
-from .paths import ASSETS, THEME_ID, t3_home
+from .paths import ASSETS, THEME_ID, atomic_write, t3_home
 
 LIMITS = (-10, -7.5, -5.5, -3.5, -1.6, 0.8, 3.5, 7, 12)
 PHASES = ("night", "day", *(f"{direction}{level}" for direction in ("rise", "set")
@@ -59,17 +55,14 @@ def phase_at(now, observer):
     return ("rise" if later > altitude else "set") + str(level)
 
 
-def publish(source, target):
-    if target.exists() and filecmp.cmp(source, target, shallow=False):
+def publish(source, target, *, force=False):
+    if not force and target.exists() and filecmp.cmp(source, target, shallow=False):
         return
     # Stage on the destination filesystem. T3's watcher sees a complete new inode.
-    with TemporaryDirectory(dir=target.parent, prefix=".sinnoh-") as temp:
-        staged = Path(temp) / source.name
-        shutil.copyfile(source, staged)
-        os.replace(staged, target)
+    atomic_write(target, source.read_bytes())
 
 
-def sync(root=None, *, status_only=False, now=None):
+def sync(root=None, *, status_only=False, force=False, now=None):
     root = t3_home() if root is None else root
     now = now or datetime.now(timezone.utc)
     zone = reload_localzone()
@@ -77,7 +70,7 @@ def sync(root=None, *, status_only=False, now=None):
     phase = phase_at(now, observer)
     target = root / "userdata" / "themes" / f"{THEME_ID}.webp"
     if not status_only and target.with_suffix(".json").is_file():
-        publish(ASSETS / "phases" / f"{phase}.webp", target)
+        publish(ASSETS / "phases" / f"{phase}.webp", target, force=force)
     return f"{zone.key} ({observer.latitude:.3f}, {observer.longitude:.3f}), {phase}"
 
 
@@ -86,4 +79,6 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--status", action="store_true", help="Report the solar phase without publishing")
-    print(sync(status_only=parser.parse_args().status))
+    parser.add_argument("--force", action="store_true", help="Replace the background even if its content matches")
+    args = parser.parse_args()
+    print(sync(status_only=args.status, force=args.force))
