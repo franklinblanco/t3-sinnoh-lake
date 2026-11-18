@@ -134,9 +134,11 @@ with patch("sinnoh.poketch_theme.read_providers", return_value=providers):
         <title>T3 Code</title>
       </head>
       <body>
-        <main data-slot="sidebar-inset">
+        <main data-slot="sidebar-inset" style="position:relative;z-index:0;min-height:100vh">
           <div data-chat-canvas data-route="local"><textarea></textarea></div>
         </main>
+        <aside aria-label="Other floating preview"
+          style="position:fixed;right:0;bottom:0;width:320px;height:230px;z-index:48"></aside>
       </body>
     </html>`);
   await page.evaluate((css) => {

@@ -55,6 +55,9 @@
   }
 
   :root > head {
+    /* Keep the clickable controls in the same foreground layer as the face.
+       The fixed head otherwise traps them behind chat and floating previews. */
+    z-index: 49;
     scroll-timeline: --sinnoh-providers x;
     scroll-marker-group: after;
     container: sinnoh-providers / scroll-state;
