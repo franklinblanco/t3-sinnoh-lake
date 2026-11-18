@@ -1,0 +1,5 @@
+astral==3.2
+tzdata==2026.6
+tzlocal==5.3.1
+PySide6-Essentials==6.10.2; sys_platform != "darwin"
+python-xlib==0.33; sys_platform == "linux"
