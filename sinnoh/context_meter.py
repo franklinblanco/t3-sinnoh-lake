@@ -5,7 +5,7 @@ from itertools import zip_longest
 from pathlib import Path
 import sqlite3
 
-from .paths import ASSETS, THEME_ID, atomic_write, t3_home
+from .paths import THEME_ID, atomic_write, t3_home
 from .remote_context import linked_readings, percentage
 
 START = "/* Sinnoh context meter */"
@@ -112,7 +112,7 @@ def meter_css(rows, budget):
     return '\n'.join([*blocks, END])
 
 
-def sync(root=None, *, poketch_url=None):
+def sync(root=None, *, poketch_css=None):
     root = t3_home() if root is None else Path(root)
     path = root / "userdata" / "themes" / f"{THEME_ID}.json"
     if not path.is_file():
@@ -123,22 +123,21 @@ def sync(root=None, *, poketch_url=None):
     if marker and END not in tail:
         return
     base = (before + (tail.partition(END)[2] if marker else "")).rstrip()
-    if poketch_url is not None:
+    if poketch_css is not None:
         prefix, panel_marker, suffix = base.partition(PANEL_START)
         if panel_marker and PANEL_END not in suffix:
             return
         base = (prefix + (suffix.partition(PANEL_END)[2] if panel_marker else "")).rstrip()
-        styles = (ASSETS / "poketch" / "floating.css").read_text(encoding="utf-8")
-        panel = styles.replace("__POKETCH_URL__", css_string(poketch_url)[1:-1]).rstrip()
-        base = "\n".join(part for part in (base, PANEL_START, panel, PANEL_END) if part)
+        base = "\n".join(part for part in (base, PANEL_START, poketch_css.rstrip(), PANEL_END) if part)
     try:
         env, rows = readings(root)
     except (OSError, sqlite3.Error):
-        if poketch_url is None:
+        if poketch_css is None:
             return
-        # A busy database should not clear the last reading. If necessary wait
-        # for the next tick to fit the overlay and regenerated readings together.
+        # Preserve cached readings when they still fit after replacing the panel.
         context = marker + tail.partition(END)[0] + END if marker else ""
+        if len((base + "\n" + context).encode()) > LIMIT:
+            context = meter_css([], LIMIT - len(base.encode()) - 1)
     else:
         rows.extend(linked_readings(root, env))
         context = meter_css(rows, LIMIT - len(base.encode()) - 1)

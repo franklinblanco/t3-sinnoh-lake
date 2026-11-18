@@ -1,4 +1,4 @@
-"""Serve the Pokétch panel for T3 Desktop's docked browser on this machine."""
+"""Publish the Pokétch theme and serve its standalone loopback panel."""
 from argparse import ArgumentTypeError
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -6,7 +6,7 @@ import logging
 import socket
 import sys
 from threading import Thread
-from time import sleep
+from time import monotonic, sleep
 
 from .paths import ASSETS
 from .usage import read_providers
@@ -109,14 +109,22 @@ class PanelServer(ThreadingHTTPServer):
 
 
 def clock(root, port):
+    from .poketch_theme import styles
     from .solar import sync
 
+    last_css = None
+    next_sync = 0
     while True:
         try:
-            sync(root, poketch_url=panel_url(port))
+            css = styles(root, port)
+            now = monotonic()
+            if css != last_css or now >= next_sync:
+                sync(root, poketch_css=css)
+                last_css = css
+                next_sync = now + 60
         except Exception:
-            logging.exception("Could not update the lake theme. Retrying in one minute.")
-        sleep(60)
+            logging.exception("Could not update the lake theme. Retrying in 10 seconds.")
+        sleep(10)
 
 
 def serve(root, port):

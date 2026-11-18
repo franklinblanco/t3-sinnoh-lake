@@ -101,7 +101,8 @@ def main():
     start(directory, python, port)
     activated = args.keep_theme or select_theme(root)
     print(f"Sinnoh Lake installed in {directory}")
-    print(f"Open {panel_url(port)} in T3 Code's Browser, then choose Float preview over chat.")
+    print("Pokétch appears automatically in chats using Sinnoh Rift · Lake Life.")
+    print(f"The standalone panel is available at {panel_url(port)}")
     return 0 if activated else 2
 
 

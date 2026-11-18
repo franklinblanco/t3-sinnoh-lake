@@ -63,7 +63,7 @@ def publish(source, target, *, force=False):
     atomic_write(target, source.read_bytes())
 
 
-def sync(root=None, *, status_only=False, force=False, now=None, poketch_url=None):
+def sync(root=None, *, status_only=False, force=False, now=None, poketch_css=None):
     root = t3_home() if root is None else root
     now = now or datetime.now(timezone.utc)
     zone = reload_localzone()
@@ -72,7 +72,7 @@ def sync(root=None, *, status_only=False, force=False, now=None, poketch_url=Non
     target = root / "userdata" / "themes" / f"{THEME_ID}.webp"
     if not status_only and target.with_suffix(".json").is_file():
         publish(ASSETS / "phases" / f"{phase}.webp", target, force=force)
-        sync_context_meter(root, poketch_url=poketch_url)
+        sync_context_meter(root, poketch_css=poketch_css)
     return f"{zone.key} ({observer.latitude:.3f}, {observer.longitude:.3f}), {phase}"
 
 

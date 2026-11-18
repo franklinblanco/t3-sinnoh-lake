@@ -1,0 +1,272 @@
+/* These metadata elements have no app UI. Their scroll offsets are the only
+   mutable state. Use a fixed-size track so viewport resize never changes a step. */
+@supports __SUPPORT__ {
+  @property --sinnoh-provider-progress { syntax: "<number>"; inherits: true; initial-value: 0; }
+  @property --sinnoh-provider { syntax: "<integer>"; inherits: true; initial-value: 0; }
+  @property --sinnoh-window-progress { syntax: "<number>"; inherits: false; initial-value: 0; }
+  @property --sinnoh-window { syntax: "<integer>"; inherits: false; initial-value: 0; }
+  @keyframes sinnoh-provider { to { --sinnoh-provider-progress: 1; } }
+  @keyframes sinnoh-window { to { --sinnoh-window-progress: 1; } }
+
+  :root {
+    timeline-scope: --sinnoh-providers, --sinnoh-window-0, --sinnoh-window-1, --sinnoh-window-2;
+    animation: sinnoh-provider auto linear both;
+    animation-timeline: --sinnoh-providers;
+    --sinnoh-provider: round(nearest, calc(var(--sinnoh-provider-progress) * (__PROVIDERS__ - 1)), 1);
+    --sinnoh-track: __TRACK__;
+    --sinnoh-windows: __WINDOWS__;
+    --sinnoh-width: max(0px, min(
+      clamp(192px, calc(min(240px, 21.818182vw, 32vh) + max(0px, min(16.666667vw - 240px, 26.666667vh - 240px))), 384px),
+      calc(100vw - 28px),
+      calc((100vh - 90px) * 40 / 21)
+    ));
+    --sinnoh-scale: calc(var(--sinnoh-width) / 240px);
+    --sinnoh-lcd-x: calc(14px + 41px * var(--sinnoh-scale));
+    --sinnoh-lcd-y: calc(90px + 15px * var(--sinnoh-scale));
+    --sinnoh-lcd-w: calc(186px * var(--sinnoh-scale));
+    --sinnoh-lcd-h: calc(96px * var(--sinnoh-scale));
+    --sinnoh-rocker-x: calc(14px + 3px * var(--sinnoh-scale));
+    --sinnoh-rocker-y: calc(90px + 19px * var(--sinnoh-scale));
+    --sinnoh-rocker-w: calc(30px * var(--sinnoh-scale));
+    --sinnoh-rocker-h: calc(44px * var(--sinnoh-scale));
+  }
+
+  :root > head,
+  :root > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"]) {
+    display: block;
+    position: fixed;
+    top: -200px;
+    left: 0;
+    width: 100px;
+    height: 16px;
+    overflow: auto hidden;
+    columns: 100px;
+    column-gap: 0;
+    column-fill: auto;
+    direction: ltr;
+    writing-mode: horizontal-tb;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+    scroll-behavior: auto;
+    overscroll-behavior: contain;
+    pointer-events: none;
+    font-size: 0;
+    line-height: 0;
+  }
+
+  :root > head {
+    scroll-timeline: --sinnoh-providers x;
+    scroll-marker-group: after;
+    container: sinnoh-providers / scroll-state;
+  }
+
+  :root > head > title { --sinnoh-host: 0; scroll-timeline: --sinnoh-window-0 x; }
+  :root > head > meta[name="theme-color"] { --sinnoh-host: 1; scroll-timeline: --sinnoh-window-1 x; }
+  :root > head > link[rel="apple-touch-icon"] { --sinnoh-host: 2; scroll-timeline: --sinnoh-window-2 x; }
+  :root > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"]) {
+    --sinnoh-pages: if(style(--sinnoh-host: var(--sinnoh-track)): var(--sinnoh-windows); else: 1);
+    scroll-marker-group: after;
+  }
+
+  :root > head::before,
+  :root > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::before {
+    content: "";
+    display: block;
+    height: calc(16px * var(--sinnoh-pages));
+  }
+
+  :root > head::before { --sinnoh-pages: __PROVIDERS__; }
+  :root > head::column,
+  :root > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::column {
+    scroll-snap-align: start;
+  }
+
+  /* Markers at the ends let a disabled native scroll button wrap to the other end. */
+  :root > head > :is(meta[charset], meta[name="viewport"]) {
+    display: block;
+    position: absolute;
+    top: 0;
+    width: 1px;
+    height: 1px;
+    scroll-snap-align: start;
+  }
+
+  :root > head > meta[charset] { left: 0; }
+  :root > head > meta[name="viewport"] { left: calc(100px * (__PROVIDERS__ - 1)); }
+
+  :root > head::scroll-marker-group {
+    position: fixed;
+    inset: auto var(--sinnoh-rocker-x) var(--sinnoh-rocker-y) auto;
+    width: var(--sinnoh-rocker-w);
+    height: calc(89px * var(--sinnoh-scale));
+    display: flex;
+    flex-direction: column-reverse;
+    justify-content: space-between;
+    pointer-events: none;
+    z-index: 50;
+  }
+
+  :root > head > :is(meta[charset], meta[name="viewport"])::scroll-marker {
+    display: block;
+    width: var(--sinnoh-rocker-w);
+    height: var(--sinnoh-rocker-h);
+    visibility: hidden;
+  }
+
+  :root > head > meta[charset]::scroll-marker { content: __NEXT__; }
+  :root > head > meta[name="viewport"]::scroll-marker { content: __PREVIOUS__; }
+
+  /* A one-page LCD (or inactive track) has no controls. The first marker sits
+     inside the clipped group and gets the click only at the end of the track. */
+  :root > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::scroll-marker-group {
+    position: fixed;
+    inset: auto var(--sinnoh-lcd-x) var(--sinnoh-lcd-y) auto;
+    width: var(--sinnoh-lcd-w);
+    height: var(--sinnoh-lcd-h);
+    overflow: clip;
+    display: flex;
+    pointer-events: none;
+    z-index: 50;
+  }
+
+  :root > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::column::scroll-marker {
+    content: if(style(--sinnoh-pages: 1): none; else: "" / "Next quota window");
+    flex: 0 0 var(--sinnoh-lcd-w);
+    visibility: hidden;
+  }
+
+  :root > head::scroll-button(left),
+  :root > head::scroll-button(right),
+  :root > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::scroll-button(right) {
+    appearance: none;
+    position: fixed;
+    box-sizing: border-box;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    background: transparent;
+    color: transparent;
+    pointer-events: none;
+    visibility: hidden;
+    z-index: 51;
+  }
+
+  :root > head::scroll-button(left),
+  :root > head::scroll-button(right) {
+    inset: auto var(--sinnoh-rocker-x) var(--sinnoh-rocker-y) auto;
+    width: var(--sinnoh-rocker-w);
+    height: var(--sinnoh-rocker-h);
+  }
+
+  :root > head::scroll-button(left) {
+    content: "" / "Previous provider";
+    bottom: calc(var(--sinnoh-rocker-y) + 45px * var(--sinnoh-scale));
+  }
+
+  :root > head::scroll-button(right) { content: "" / "Next provider"; }
+
+  :root > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::scroll-button(right) {
+    content: "" / "Next quota window";
+    inset: auto var(--sinnoh-lcd-x) var(--sinnoh-lcd-y) auto;
+    width: var(--sinnoh-lcd-w);
+    height: var(--sinnoh-lcd-h);
+  }
+
+  /* Settings and Usage may leave the previous chat mounted in an inert sidebar inset. */
+  __CHAT__ {
+    &::before,
+    &::after {
+      content: "";
+      position: fixed;
+      box-sizing: border-box;
+      pointer-events: none;
+      z-index: 49;
+    }
+
+    &::before {
+      inset: auto 14px 90px auto;
+      width: var(--sinnoh-width);
+      height: calc(var(--sinnoh-width) * 21 / 40);
+      background: __HOUSING__ center / contain no-repeat;
+      filter: drop-shadow(0 3px 7px #0c0f1f);
+    }
+
+    &::after {
+      inset: auto var(--sinnoh-lcd-x) var(--sinnoh-lcd-y) auto;
+      width: var(--sinnoh-lcd-w);
+      height: var(--sinnoh-lcd-h);
+      animation: sinnoh-window auto linear both;
+      animation-timeline: if(style(--sinnoh-track: 1): --sinnoh-window-1;
+        style(--sinnoh-track: 2): --sinnoh-window-2; else: --sinnoh-window-0);
+      --sinnoh-window: round(nearest, calc(var(--sinnoh-window-progress) * (var(--sinnoh-windows) - 1)), 1);
+      content: "" / __DESCRIPTIONS__;
+      background-image: __FACES__;
+      background-position: calc(-1 * var(--sinnoh-provider) * var(--sinnoh-lcd-w))
+        calc(-1 * var(--sinnoh-window) * var(--sinnoh-lcd-h));
+      background-size: calc(var(--sinnoh-lcd-w) * __PROVIDERS__) calc(var(--sinnoh-lcd-h) * __MAX_WINDOWS__);
+      background-repeat: no-repeat;
+    }
+
+    & > head::scroll-button(left):enabled,
+    & > head::scroll-button(right):enabled,
+    & > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::scroll-button(right):enabled {
+      visibility: visible;
+      pointer-events: auto;
+      cursor: pointer;
+    }
+
+    & > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::column::scroll-marker {
+      visibility: visible;
+      pointer-events: auto;
+      cursor: pointer;
+    }
+
+    & > head::scroll-button(left):focus-visible,
+    & > head::scroll-button(right):focus-visible,
+    & > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::scroll-button(right):focus-visible,
+    & > head > :is(meta[charset], meta[name="viewport"])::scroll-marker:focus-visible,
+    & > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::column::scroll-marker:focus-visible {
+      outline: 2px solid white;
+      outline-offset: -3px;
+    }
+
+    & > head::scroll-button(left):active,
+    & > head::scroll-button(right):active,
+    & > head > :is(meta[charset], meta[name="viewport"])::scroll-marker:active {
+      background: #68162666;
+    }
+
+    @container sinnoh-providers not scroll-state(scrollable: right) {
+      & > head > meta[charset]::scroll-marker {
+        visibility: visible;
+        pointer-events: auto;
+        cursor: pointer;
+      }
+    }
+
+    @container sinnoh-providers not scroll-state(scrollable: left) {
+      & > head > meta[name="viewport"]::scroll-marker {
+        visibility: visible;
+        pointer-events: auto;
+        cursor: pointer;
+      }
+    }
+  }
+
+  __CHAT__ __FLOAT__:has(__LEGACY_GUEST__) {
+    opacity: 0 !important;
+    pointer-events: none !important;
+    interactivity: inert;
+    & __LEGACY_GUEST__ { pointer-events: none !important; }
+  }
+
+  /* T3 Nightly shows one active floating Browser per chat. If a second Browser
+     surface is floating, leave the shell alone because it could be unrelated. */
+  __CHAT__:has(__FLOAT__ __LEGACY_GUEST__):not(:has(__FLOAT__ webview:not(__LEGACY_GUEST__))) {
+    & [data-chat-canvas] [data-preview-mini-player^="browser:"] { visibility: hidden !important; }
+    & [data-chat-canvas]:has([data-preview-mini-player^="browser:"]) {
+      --chat-lane-inset-start: 0px !important;
+      --chat-lane-inset-end: 0px !important;
+    }
+  }
+}

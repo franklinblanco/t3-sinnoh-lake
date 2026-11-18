@@ -16,25 +16,22 @@ On a fresh install, omit `--keep-theme` to select **Sinnoh Rift · Lake Life** t
 
 The default T3 data directory is `~/.t3`. Set `T3CODE_HOME` or pass `--t3-home PATH` for a custom directory. The installer prints the panel URL. If the default port is occupied, pass `--port PORT` and use the printed URL.
 
-## Open Pokétch
+## Pokétch in chat
 
-1. In a thread on your local T3 environment, open the **right panel**.
-2. Choose **Browser**, or use **+ → Browser** if the right panel already has tabs.
-3. Enter `http://127.0.0.1:47984/poketch/` in the Browser address bar.
-4. Select **Float preview over chat** in the Browser toolbar. Select **Sinnoh Rift · Lake Life** to apply Pokétch’s placement and sizing.
+Select **Sinnoh Rift · Lake Life** in **Settings → Appearance**. Pokétch appears as soon as T3 renders any existing chat or new draft, including chats on linked environments. It keeps the selected provider and quota window through thread switches. The panel hides on non-chat screens and when the T3 window is minimized or closed. Reloading T3 starts the panel at its default provider and quota window.
 
 Pokétch floats 14 px from the right edge and 90 px from the bottom of the T3 viewport. Its reference size is 240 × 126 px at T3’s default window size. The whole device scales down in compact windows and up in larger ones.
 
-The floating Browser belongs to the thread. Open and float it in each thread where you want it, and reopen it if T3 clears the tab after a restart. Minimizing or closing the T3 window hides the monitor with it. The background worker continues to update the theme.
+The update hides the old floating Pokétch when its tab is on the installed loopback URL. The tab remains available in the right panel and you can close it there. Docked tabs and other Browser pages retain their layout.
 
-This uses T3’s stock floating Browser and a small set of theme rules for its placement and size. Tested in T3 Nightly `0.1.11-nightly.20261118.4890`. An interactive global widget would need a renderer extension point. The proposed plugin host was closed without merging. [T3 Browser documentation](https://github.com/pingdotgg/t3code/blob/8cf97b5f06f30a872ce30ab8a888f2ff012365a2/docs/user/remote-access.md#browser-on-a-remote-environment) · [Theme CSS documentation](https://github.com/pingdotgg/t3code/blob/8cf97b5f06f30a872ce30ab8a888f2ff012365a2/docs/user/appearance.md#custom-css) · [Plugin proposal](https://github.com/pingdotgg/t3code/pull/33606)
+The panel uses T3’s published theme CSS and Chromium’s native scrolling controls. It was tested in T3 Nightly `0.1.11-nightly.20261118.4890`. On a client that lacks the needed CSS features, open the installer’s loopback URL in the thread’s **Browser** and select **Float preview over chat**. [T3 theme CSS documentation](https://github.com/pingdotgg/t3code/blob/8cf97b5f06f30a872ce30ab8a888f2ff012365a2/docs/user/appearance.md#custom-css) · [Chromium scroll controls](https://developer.chrome.com/blog/new-in-web-ui-io-2025-recap)
 
-The worker binds to IPv4 loopback and serves only the panel and its read-only quota snapshot. It reads the provider instance configuration and cached quota fields on this machine. T3’s Browser can share tabs with paired T3 clients through its normal environment access.
+The worker reads the provider instance configuration and cached quota fields on the machine where it runs. It updates the displayed quota through the published theme, so a theme export or a client following that environment theme receives the display values. The standalone panel and its read-only quota endpoint bind to IPv4 loopback.
 
 ## Quota, context and local time
 
 - Press the upper or lower red rocker to cycle through every configured provider instance and any enabled built-ins present in T3’s cache.
-- **LEFT** and the meter show remaining quota. The LCD starts on the tightest valid quota window for the selected provider. Click the LCD to cycle all reported windows. Reset times use the desktop’s locale and time zone.
+- **LEFT** and the meter show remaining quota. The LCD starts on the tightest valid quota window for the selected provider. Click the LCD to cycle all reported windows. The theme uses the worker’s local time zone for reset times.
 - Expired quota values are hidden until T3 reports a new snapshot. Selecting an expired window shows **Awaiting reset update**. Unknown quota shows a dash. A valid exhausted window shows **0%** and an empty meter.
 - Hover over the ring to the left of the composer’s model picker for the thread’s context percentage. Linked machines use the latest reading T3 Desktop received, including last-known data when a machine goes offline. The theme prioritizes recent and active threads within T3’s stylesheet size limit.
 - The solar clock checks the local zone once a minute and selects one of 18 animated WebP loops based on solar altitude at the zone’s representative city. T3 reloads the image from its watched theme directory.

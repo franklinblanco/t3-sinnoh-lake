@@ -92,15 +92,23 @@ def mac_stop(label):
 
 def mac_start(directory, python, port):
     command = [str(python), str(directory / "launch.py")]
-    if mac_job_owned(MAC_PANEL, [command]):
-        mac_stop(MAC_PANEL)
     path = mac_job_path(MAC_PANEL)
-    atomic_write(path, plistlib.dumps({
+    owned = mac_job_owned(MAC_PANEL, [command])
+    definition = plistlib.dumps({
         "Label": MAC_PANEL, "RunAtLoad": True, "ProcessType": "Background",
         "ProgramArguments": command, "ThrottleInterval": 15,
         "KeepAlive": {"SuccessfulExit": False},
-    }))
-    subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(path)], check=True)
+    })
+    domain = f"gui/{os.getuid()}"
+    if owned and path.read_bytes() == definition and mac_job_is_loaded(MAC_PANEL):
+        # Reuse the loaded job. launchd can still be removing a booted-out label
+        # when an immediate bootstrap tries to register it again.
+        subprocess.run(["launchctl", "kickstart", "-k", f"{domain}/{MAC_PANEL}"], check=True)
+    else:
+        if owned:
+            mac_stop(MAC_PANEL)
+        atomic_write(path, definition)
+        subprocess.run(["launchctl", "bootstrap", domain, str(path)], check=True)
     wait_for_panel(port, directory)
     jobs = {
         MAC_OVERLAY: [[str(directory / "Poketch.app/Contents/MacOS/Poketch")]],

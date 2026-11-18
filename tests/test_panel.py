@@ -12,7 +12,7 @@ from time import monotonic, sleep
 import unittest
 from unittest.mock import patch
 
-from sinnoh import context_meter
+from sinnoh import context_meter, poketch_theme
 from sinnoh.panel import HOST, PANEL_PATH, USAGE_PATH, PanelServer
 from sinnoh.startup import check_port, linux_stop, panel_ready, windows_task, windows_task_owned
 from test_sinnoh import fixture
@@ -26,18 +26,19 @@ class PanelTest(unittest.TestCase):
             theme.parent.mkdir(parents=True)
             user_css = "body { color: rebeccapurple; }"
             theme.write_text(json.dumps({"css": user_css}), encoding="utf-8")
-            first = "http://127.0.0.1:47984/poketch/"
-            second = "http://127.0.0.1:47985/poketch/"
+            first = "http://127.0.0.1:47985/poketch/"
+            second = "http://127.0.0.1:47986/poketch/"
             with patch.object(context_meter, "readings", return_value=("local", [])), patch.object(
                 context_meter, "linked_readings", return_value=[("remote", "thread", 72)],
             ):
-                context_meter.sync(root, poketch_url=first)
-                context_meter.sync(root, poketch_url=second)
+                context_meter.sync(root, poketch_css=poketch_theme.styles(root, 47985))
+                context_meter.sync(root, poketch_css=poketch_theme.styles(root, 47986))
             css = json.loads(theme.read_bytes())["css"]
             self.assertIn(user_css, css)
             self.assertIn("72% of context used", css)
             self.assertIn(second, css)
             self.assertNotIn(first, css)
+            self.assertIn("--sinnoh-providers", css)
             self.assertEqual(css.count(context_meter.PANEL_START), 1)
 
     def test_only_same_origin_requests_get_quota_fields(self):
@@ -107,10 +108,13 @@ class PanelTest(unittest.TestCase):
             with subprocess.Popen(command, env=os.environ | env, stderr=subprocess.PIPE) as worker:
                 try:
                     until = monotonic() + 12
+                    css = ""
                     while monotonic() < until and worker.poll() is None:
-                        if (themes / "sinnoh-lake-life.webp").is_file() and panel_ready(port):
+                        css = json.loads((themes / "sinnoh-lake-life.json").read_text()).get("css", "")
+                        if "--sinnoh-providers" in css and panel_ready(port):
                             break
                         sleep(0.1)
+                    self.assertIn("--sinnoh-providers", css)
                     self.assertTrue((themes / "sinnoh-lake-life.webp").is_file())
                     self.assertTrue(panel_ready(port))
                     self.assertIsNone(worker.poll())
