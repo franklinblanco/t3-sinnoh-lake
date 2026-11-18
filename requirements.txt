@@ -1,7 +1,5 @@
 astral==3.2
 tzdata==2026.6
 tzlocal==5.3.1
-PySide6-Essentials==6.10.2; sys_platform != "darwin"
-python-xlib==0.33; sys_platform == "linux"
 ccl_chromium_reader @ https://github.com/cclgroupltd/ccl_chromium_reader/archive/7a01b07dc5205a9c12004f2c9eabce0bb4697860.zip
 cramjam==2.14.0

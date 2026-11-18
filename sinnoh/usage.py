@@ -2,7 +2,6 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
-import math
 
 
 def read_object(path):
@@ -38,14 +37,6 @@ class Window:
     label: str
     used: float | None
     reset: datetime | None
-
-    def expired(self, now):
-        return self.reset is not None and self.reset <= now
-
-    def remaining(self, now):
-        if self.used is None or self.expired(now):
-            return None
-        return 100 - self.used
 
 
 @dataclass(frozen=True)
@@ -102,6 +93,8 @@ def read_providers(root):
     configured = obj(settings.get("providerInstances"))
     cached = {}
     for path in sorted((root / "caches").glob("*.json")):
+        if path.name.startswith("acp-auth-") and path.stem not in configured:
+            continue  # This is an ACP auth probe cache, not a provider status snapshot.
         record = read_object(path)
         id_ = record.get("instanceId")
         if not isinstance(id_, str) or not id_:
@@ -112,47 +105,3 @@ def read_providers(root):
     items = [provider(id_, obj(configured.get(id_)), cached.get(id_, {}))
              for id_ in configured.keys() | cached.keys()]
     return sorted(items, key=lambda item: (item.id != "codex", item.name.casefold(), item.id))
-
-
-def percent_text(remaining):
-    return "—" if remaining is None else f"{math.floor(remaining + 0.5)}%"
-
-
-def filled_segments(remaining):
-    return None if remaining is None else math.ceil(remaining * 12 / 100)
-
-
-class Selection:
-    def __init__(self, provider_id="codex"):
-        self.items = []
-        self.provider_id = provider_id
-        self.window_id = None
-
-    def refresh(self, items):
-        self.items = items
-        if items and all(p.id != self.provider_id for p in items):
-            self.provider_id, self.window_id = items[0].id, None
-
-    def current(self, now):
-        for index, item in enumerate(self.items):
-            if item.id != self.provider_id:
-                continue
-            windows = item.windows
-            chosen = next((i for i, w in enumerate(windows) if w.id == self.window_id), None)
-            if chosen is None:
-                valid = [(w.used, i) for i, w in enumerate(windows) if w.remaining(now) is not None]
-                chosen = max(valid, key=lambda entry: entry[0])[1] if valid else 0
-            window = windows[chosen] if windows else None
-            return index, item, chosen, window
-        return 0, None, 0, None
-
-    def step_provider(self, delta):
-        if self.items:
-            index = next(i for i, item in enumerate(self.items) if item.id == self.provider_id)
-            self.provider_id = self.items[(index + delta) % len(self.items)].id
-            self.window_id = None
-
-    def step_window(self, now):
-        _, item, index, _ = self.current(now)
-        if item and len(item.windows) > 1:
-            self.window_id = item.windows[(index + 1) % len(item.windows)].id

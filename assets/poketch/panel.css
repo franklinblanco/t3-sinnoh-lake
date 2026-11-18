@@ -1,0 +1,169 @@
+:root {
+  color-scheme: dark;
+  --ink: #26422b;
+  --lcd: #87ba7d;
+}
+body {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  margin: 0;
+  background: #161a2e;
+}
+/* The floating host gives the guest a viewport with the device's aspect ratio. */
+@media (min-aspect-ratio: 15/8) and (max-aspect-ratio: 31/16) {
+  body {
+    overflow: hidden;
+    background: transparent;
+  }
+  .housing {
+    zoom: min(calc(100vw / 240px), calc(100vh / 126px));
+  }
+}
+.housing {
+  position: relative;
+  width: 240px;
+  height: 126px;
+  filter: drop-shadow(0 3px 7px #0c0f1f);
+}
+.housing::before,
+.bezel,
+.bezel::before,
+.bezel::after,
+.rocker::before,
+.rocker::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+.housing::before {
+  background: linear-gradient(#454451 0 6px, #383b46 0) 33px 1px / 136px 124px no-repeat, #252834;
+  /* The center of the gray band is covered by the bezel. */
+  clip-path: polygon(30px 0, 173px 0, 180px 6px, 218px 6px, 232px 18px, 232px 104px,
+    221px 119px, 180px 119px, 173px 126px, 30px 126px, 25px 120px, 8px 120px,
+    1px 112px, 1px 14px, 9px 6px, 25px 6px);
+}
+.bezel {
+  background: #a6a9b2;
+  clip-path: polygon(9px 9px, 218px 9px, 229px 20px, 229px 102px,
+    219px 116px, 9px 116px, 4px 110px, 4px 15px);
+}
+.bezel::before {
+  background: #e3e2de;
+  clip-path: polygon(11px 10px, 215px 10px, 224px 17px, 205px 17px,
+    205px 109px, 9px 109px, 6px 106px, 6px 16px);
+}
+.bezel::after {
+  inset: 12px auto auto 10px;
+  width: 188px;
+  height: 98px;
+  border: 2px solid #343b3e;
+  background: #a4b99a;
+}
+button {
+  position: absolute;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+button[aria-disabled="true"] {
+  cursor: default;
+}
+button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: -3px;
+  z-index: 1;
+}
+.rocker {
+  --red: #ef4753;
+  left: 207px;
+  width: 30px;
+  height: 44px;
+  background: transparent;
+}
+.rocker::before {
+  background: #241f29;
+}
+.rocker::after {
+  background: linear-gradient(#ff8a88 0 2px, transparent 2px) 3px 3px /
+    var(--highlight) 2px no-repeat, var(--red);
+}
+.rocker > span {
+  position: absolute;
+  z-index: 1;
+  background: #852938;
+  left: 9px;
+  width: 12px;
+  height: 7px;
+}
+.previous {
+  --highlight: 13px;
+  top: 18px;
+}
+.previous::before {
+  clip-path: polygon(0 0, 17px 0, 26px 4px, 29px 12px, 29px 44px, 0 44px);
+}
+.previous::after {
+  clip-path: polygon(3px 3px, 16px 3px, 23px 6px, 27px 13px, 27px 41px, 3px 41px);
+}
+.previous > span {
+  top: 18px;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+.next {
+  --highlight: 24px;
+  top: 63px;
+}
+.next::before {
+  clip-path: polygon(0 0, 29px 0, 29px 32px, 26px 40px, 17px 44px, 0 44px);
+}
+.next::after {
+  clip-path: polygon(3px 3px, 27px 3px, 27px 31px, 23px 38px, 16px 41px, 3px 41px);
+}
+.next > span {
+  top: 19px;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+.rocker:active:not([aria-disabled="true"]) {
+  --red: #c73142;
+}
+.lcd {
+  top: 15px;
+  left: 13px;
+  width: 186px;
+  height: 96px;
+  background: linear-gradient(#759a68 0 2px, var(--lcd) 2px);
+  color: var(--ink);
+  font: 700 11px/1 ui-monospace, monospace;
+  text-align: left;
+}
+.lcd > span {
+  position: absolute;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.name { inset: 7px 38px auto 7px; font-size: 12px; }
+.position { inset: 8px 4px auto auto; font: 10px/1 ui-monospace, monospace; }
+.divider { inset: 24px 4px auto 7px; height: 1px; background: #6d9364; }
+.percent { display: flex; align-items: center; gap: 3px; left: 9px; top: 32px; font-size: 14px; }
+.dash { display: block; width: 25px; height: 3px; margin: 11px 2px; background: var(--ink); }
+.digit { position: relative; width: 16px; height: 26px; }
+.digit > i { position: absolute; background: var(--ink); }
+.left { top: 32px; left: 109px; font-size: 9px; }
+.old { top: 32px; right: 6px; font-size: 9px; font-weight: normal; }
+.meter { top: 46px; left: 109px; display: flex; gap: 2px; }
+.meter[hidden] { display: none; }
+.meter > i { width: 4px; height: 9px; background: #749d6b; }
+.meter > .filled { background: var(--ink); }
+.window { inset: 65px 7px auto 7px; font-size: 10px; }
+.lcd:has(.pager:not(:empty)) .window { right: 41px; }
+.pager { top: 65px; right: 4px; font-size: 9px; }
+.reset { inset: 82px 4px auto 7px; }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}

@@ -7,10 +7,9 @@ from zoneinfo import ZoneInfo
 
 from PIL import Image, ImageChops
 
-from sinnoh.follow import t3_name
 from sinnoh.paths import ASSETS
 from sinnoh.solar import PHASES, observer_for, phase_at, publish
-from sinnoh.usage import Selection, filled_segments, percent_text, read_providers
+from sinnoh.usage import read_providers
 
 NOW = datetime(2026, 3, 20, 12, tzinfo=timezone.utc)
 
@@ -53,46 +52,21 @@ def fixture(root):
 
 
 class UsageTest(unittest.TestCase):
-    def test_only_valid_quota_has_remaining_and_meter(self):
+    def test_provider_states_and_quota_windows(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             fixture(root)
             items = read_providers(root)
-        pick = Selection()
-        pick.refresh(items)
-        _, _, _, quota = pick.current(NOW)
-        self.assertEqual(quota.id, "week")
-        self.assertEqual(percent_text(quota.remaining(NOW)), "25%")
-        self.assertEqual(filled_segments(quota.remaining(NOW)), 3)
-        seen = {}
-        for _ in range(4):
-            _, _, _, selected = pick.current(NOW)
-            seen[selected.id] = selected.remaining(NOW)
-            pick.step_window(NOW)
-        self.assertEqual(seen, {"expired": None, "unreported": None, "day": 90, "week": 25})
-        self.assertEqual(percent_text(None), "—")
-        self.assertIsNone(filled_segments(None))
-        self.assertEqual(percent_text(0), "0%")
-        self.assertEqual(filled_segments(0), 0)
-        self.assertEqual(filled_segments(100), 12)
+        self.assertEqual(items[0].id, "codex")
+        codex = items[0]
+        self.assertEqual([window.used for window in codex.windows], [100, 10, 75, None])
+        self.assertEqual(codex.windows[2].reset, NOW + timedelta(days=1))
+        self.assertIn("enabled-default", [item.id for item in items])
         self.assertEqual({item.id: item.status for item in items if not item.windows}, {
             "awaiting": "Awaiting T3 data", "disabled": "Provider disabled",
             "failed": "Usage check failed", "signed-out": "Sign-in required",
             "cap": "Zero spend cap", "unsupported": "Quota not supported",
         })
-        for _ in items:
-            pick.step_provider(1)
-        self.assertEqual(pick.provider_id, "codex")
-        pick.step_provider(-1)
-        pick.step_provider(1)
-        self.assertEqual(pick.current(NOW)[3].id, "week")
-        self.assertEqual(pick.current(NOW + timedelta(days=2))[3].id, "expired")
-
-    def test_windows_process_and_x11_class_names(self):
-        for name in ["T3 Code (Nightly).exe", "T3 Code", "t3code", "t3-code"]:
-            self.assertTrue(t3_name(name))
-        self.assertFalse(t3_name("Mozilla Firefox"))
-        self.assertFalse(t3_name("Pokétch"))
 
 
 class SolarTest(unittest.TestCase):

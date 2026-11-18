@@ -1,21 +1,18 @@
-"""Start the installed monitor with the T3 data directory selected at install time."""
+"""Run the installed loopback Pokétch service and solar/context clock."""
 import json
 import logging
-import os
 from pathlib import Path
-import sys
+
+from sinnoh.panel import serve
 
 
 if __name__ == "__main__":
     directory = Path(__file__).resolve().parent
-    log = directory / "monitor.log"
+    logging.basicConfig(filename=directory / "monitor.log", level=logging.INFO,
+                        format="%(asctime)s %(message)s")
+    config = json.loads((directory / "install.json").read_text(encoding="utf-8"))
     try:
-        os.environ.setdefault("T3CODE_HOME", json.loads((directory / "t3-home.json").read_text("utf-8")))
-        sys.argv.extend(["--log", str(log)])
-        from sinnoh.monitor import main
-
-        sys.exit(main())
-    except Exception:
-        logging.basicConfig(filename=log)
-        logging.exception("Pokétch could not start")
-        sys.exit(1)
+        serve(Path(config["t3_home"]), config["port"])
+    except OSError:
+        logging.exception("Could not start Pokétch")
+        raise SystemExit(1)

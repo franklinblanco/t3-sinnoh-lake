@@ -1,16 +1,16 @@
-"""Install Sinnoh Lake Life and Pokétch for the current desktop user."""
+"""Install Sinnoh Lake Life and the in-window Pokétch for the current user."""
 import argparse
 import json
 import os
 from pathlib import Path
-import plistlib
 import shutil
 import subprocess
 import sys
-from tempfile import TemporaryDirectory
 import venv
 
+from sinnoh.panel import DEFAULT_PORT, panel_url, parse_port
 from sinnoh.paths import ASSETS, THEME_ID, atomic_write, t3_home
+from sinnoh.startup import check_port, linux_start, mac_start, windows_start
 
 REPO = Path(__file__).resolve().parent
 
@@ -24,9 +24,8 @@ def app_dir():
 
 
 def write_atomic(target, data):
-    if sys.platform != "win32" and target.is_file() and target.read_bytes() == data:
-        return
-    atomic_write(target, data)
+    if not target.is_file() or target.read_bytes() != data:
+        atomic_write(target, data)
 
 
 def copy_tree(source, dest):
@@ -37,13 +36,12 @@ def copy_tree(source, dest):
 
 def install_theme(directory, root, python):
     themes = root / "userdata" / "themes"
-    for path in ASSETS.glob("sinnoh-rift.*"):
-        write_atomic(themes / path.name, path.read_bytes())
-    write_atomic(themes / f"{THEME_ID}.json", (ASSETS / f"{THEME_ID}.json").read_bytes())
-    command = [python, "-m", "sinnoh.solar"]
-    if sys.platform == "win32":
-        command.append("--force")
-    subprocess.run(command, cwd=directory, check=True)
+    for pattern in ("sinnoh-rift.*", f"{THEME_ID}.json"):
+        for source in ASSETS.glob(pattern):
+            target = themes / source.name
+            if not target.exists():
+                write_atomic(target, source.read_bytes())
+    subprocess.run([python, "-m", "sinnoh.solar"], cwd=directory, check=True)
 
 
 def select_theme(root):
@@ -52,8 +50,10 @@ def select_theme(root):
     if command[0]:
         if sys.platform == "win32" and Path(command[0]).suffix.lower() in {".bat", ".cmd"}:
             # cmd.exe strips its outer quotes, keeping the quotes on the executable path.
-            quoted = f'""{command[0]}" theme set {THEME_ID}"'
-            result = subprocess.run(f'cmd.exe /d /s /c {quoted}')
+            # Pass the path through one expansion so literal percent signs in it stay literal.
+            quoted = f'""%SINNOH_T3_CLI%" theme set {THEME_ID}"'
+            result = subprocess.run(f'cmd.exe /d /v:off /s /c {quoted}',
+                                    env=os.environ | {"SINNOH_T3_CLI": command[0]})
         else:
             result = subprocess.run([*command, "theme", "set", THEME_ID])
         if result.returncode == 0:
@@ -63,81 +63,25 @@ def select_theme(root):
     return False
 
 
-def windows_start(directory, python):
-    subprocess.run(
-        ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-         "-File", str(REPO / "install-windows.ps1"), "-Pythonw", str(python.with_name("pythonw.exe")),
-         "-Launcher", str(directory / "launch.py")],
-        check=True,
-    )
-
-
-def desktop_arg(value):
-    # Desktop Entry Exec quoting has two layers. Escape literal percent as a field code.
-    text = str(value).replace("%", "%%")
-    quoted = "".join("\\" + ch if ch in '"\\$`' else ch for ch in text)
-    return '"' + quoted.replace("\\", "\\\\") + '"'
-
-
-def linux_start(directory, python):
-    conf = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
-    launcher = directory / "launch.py"
-    command = " ".join(map(desktop_arg, (python, launcher)))
-    desktop = "[Desktop Entry]\nType=Application\nName=T3 Sinnoh Lake\n" + f"Exec={command}\n"
-    write_atomic(conf / "autostart" / "t3-sinnoh-lake.desktop", desktop.encode("utf-8"))
-    if os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY"):
-        subprocess.Popen([python, launcher], start_new_session=True,
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    else:
-        print("Pokétch will start at the next graphical login. Run the installer from the current graphical session to start it now.")
-
-
-def mac_start(directory, root, python):
-    bundle = directory / "Poketch.app" / "Contents"
-    binary = bundle / "MacOS" / "Poketch"
-    binary.parent.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(dir=binary.parent) as temp:
-        staged = Path(temp) / binary.name
-        subprocess.run(["swiftc", "-O", str(REPO / "Poketch.swift"), "-o", staged], check=True)
-        os.replace(staged, binary)
-    write_atomic(bundle / "Info.plist", plistlib.dumps({
-        "CFBundleExecutable": "Poketch", "CFBundleIdentifier": "local.t3code.sinnoh-usage",
-        "CFBundleName": "Pokétch", "CFBundlePackageType": "APPL", "LSUIElement": True,
-    }))
-    jobs = {
-        "local.t3code.sinnoh-lake-clock": {
-            "ProgramArguments": [str(python), "-m", "sinnoh.solar"],
-            "WorkingDirectory": str(directory), "StartInterval": 60,
-        },
-        "local.t3code.sinnoh-usage": {
-            "ProgramArguments": [str(binary)], "ThrottleInterval": 15,
-            "KeepAlive": {"SuccessfulExit": False},
-        },
-    }
-    domain = f"gui/{os.getuid()}"
-    for label, job in jobs.items():
-        path = Path.home() / "Library" / "LaunchAgents" / (label + ".plist")
-        subprocess.run(["launchctl", "bootout", f"{domain}/{label}"],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        write_atomic(path, plistlib.dumps({
-            "Label": label, "RunAtLoad": True, "EnvironmentVariables": {"T3CODE_HOME": str(root)},
-            **job,
-        }))
-        subprocess.run(["launchctl", "bootstrap", domain, str(path)], check=True)
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--t3-home", type=Path, default=t3_home(), help="Override the T3 data directory")
-    parser.add_argument("--keep-theme", action="store_true", help="Install without changing the selected theme")
+    parser.add_argument("--port", type=parse_port, help=f"Loopback port (default {DEFAULT_PORT})")
+    parser.add_argument("--keep-theme", action="store_true", help="Keep the selected theme")
     args = parser.parse_args()
-    if sys.platform not in {"darwin", "win32", "linux"}:
+    start = {"darwin": mac_start, "win32": windows_start, "linux": linux_start}.get(sys.platform)
+    if start is None:
         parser.error(f"Unsupported platform {sys.platform}")
     if sys.version_info < (3, 11):
         parser.error("Python 3.11 or newer is required")
+
     root = args.t3_home.expanduser().resolve()
+    directory = app_dir().resolve()
+    config = directory / "install.json"
+    previous = json.loads(config.read_text(encoding="utf-8")) if config.is_file() else {}
+    port = args.port or parse_port(previous.get("port", DEFAULT_PORT))
+    check_port(port)
     os.environ["T3CODE_HOME"] = str(root)
-    directory = app_dir()
     env = directory / ".venv"
     python = env / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
     if not python.is_file():
@@ -146,17 +90,18 @@ def main():
                     "-r", REPO / "requirements.txt"], check=True)
     copy_tree(REPO / "sinnoh", directory / "sinnoh")
     copy_tree(ASSETS / "phases", directory / "assets" / "phases")
-    write_atomic(directory / "launch.py", (REPO / "launch.py").read_bytes())
-    write_atomic(directory / "t3-home.json", json.dumps(str(root)).encode("utf-8"))
+    copy_tree(ASSETS / "poketch", directory / "assets" / "poketch")
+    launcher = directory / "launch.py"
+    backup = directory / "legacy" / launcher.name
+    if not config.exists() and launcher.is_file() and not backup.exists():
+        atomic_write(backup, launcher.read_bytes())
+    write_atomic(config, json.dumps({"t3_home": str(root), "port": port}).encode("utf-8"))
+    write_atomic(launcher, (REPO / launcher.name).read_bytes())
     install_theme(directory, root, python)
-    if sys.platform == "win32":
-        windows_start(directory, python)
-    elif sys.platform == "linux":
-        linux_start(directory, python)
-    else:
-        mac_start(directory, root, python)
+    start(directory, python, port)
     activated = args.keep_theme or select_theme(root)
     print(f"Sinnoh Lake installed in {directory}")
+    print(f"Open {panel_url(port)} in T3 Code's Browser, then choose Float preview over chat.")
     return 0 if activated else 2
 
 

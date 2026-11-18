@@ -1,120 +1,155 @@
-"""Exercise the real Qt buttons and, on X11, EWMH foreground tracking."""
+"""Verify the loopback worker, its limited read-only API, and safe migration."""
+from http.client import HTTPConnection
 import json
 import os
 from pathlib import Path
-from tempfile import TemporaryDirectory
 import subprocess
 import sys
-import time
+from tempfile import TemporaryDirectory
+from threading import Thread
+from time import monotonic, sleep
 import unittest
+from unittest.mock import patch
 
-from PySide6.QtCore import Qt
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QWidget
-
-from sinnoh.monitor import Panel, choose_follower
+from sinnoh import context_meter
+from sinnoh.panel import HOST, PANEL_PATH, USAGE_PATH, PanelServer
+from sinnoh.startup import linux_stop, panel_ready, windows_task, windows_task_owned
+from test_sinnoh import fixture
 
 
 class PanelTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.app = QApplication([])
-        cls.app.setQuitOnLastWindowClosed(False)
-
-    def test_clicks_tooltips_and_zero_remaining(self):
+    def test_floating_styles_refresh_without_losing_theme_or_context(self):
         with TemporaryDirectory() as temp:
             root = Path(temp)
-            (root / "userdata").mkdir()
-            (root / "caches").mkdir()
-            (root / "userdata" / "settings.json").write_text(json.dumps({
-                "providerInstances": {"codex": {}, "awaiting": {}},
-            }))
-            (root / "caches" / "codex.json").write_text(json.dumps({
-                "instanceId": "codex", "enabled": True, "usageLimits": {"windows": [
-                    {"id": "day", "label": "Day", "usedPercent": 75},
-                    {"id": "week", "label": "Week", "usedPercent": 100},
-                    {"id": "unknown", "label": "Unknown", "usedPercent": None},
-                ]},
-            }))
-            panel = Panel(root)
-            panel.show()
-            self.app.processEvents()
-            self.assertIn("Week, 0% remaining", panel.face.accessibleName())
-            self.assertIn("next quota window", panel.face.toolTip())
-            self.assertEqual(panel.face.grab().toImage().pixelColor(109, 46).name(), "#749d6b")
-            QTest.mouseClick(panel.face, Qt.MouseButton.LeftButton)
-            self.assertIn("Quota remaining unknown", panel.face.accessibleName())
-            self.assertEqual(panel.face.grab().toImage().pixelColor(109, 46).name(), "#87ba7d")
-            QTest.mouseClick(panel.face, Qt.MouseButton.LeftButton)
-            self.assertIn("Day, 25% remaining", panel.face.toolTip())
-            meter = panel.face.grab().toImage()
-            self.assertEqual(meter.pixelColor(121, 46).name(), "#26422b")
-            self.assertEqual(meter.pixelColor(127, 46).name(), "#749d6b")
-            QTest.mouseClick(panel.next, Qt.MouseButton.LeftButton)
-            self.assertIn("Awaiting T3 data", panel.face.accessibleName())
-            QTest.mouseClick(panel.previous, Qt.MouseButton.LeftButton)
-            self.assertIn("Week, 0% remaining", panel.face.accessibleName())
-            panel.close()
+            theme = root / "userdata/themes/sinnoh-lake-life.json"
+            theme.parent.mkdir(parents=True)
+            user_css = "body { color: rebeccapurple; }"
+            theme.write_text(json.dumps({"css": user_css}), encoding="utf-8")
+            first = "http://127.0.0.1:47984/poketch/"
+            second = "http://127.0.0.1:47985/poketch/"
+            with patch.object(context_meter, "readings", return_value=("local", [])), patch.object(
+                context_meter, "linked_readings", return_value=[("remote", "thread", 72)],
+            ):
+                context_meter.sync(root, poketch_url=first)
+                context_meter.sync(root, poketch_url=second)
+            css = json.loads(theme.read_bytes())["css"]
+            self.assertIn(user_css, css)
+            self.assertIn("72% of context used", css)
+            self.assertIn(second, css)
+            self.assertNotIn(first, css)
+            self.assertEqual(css.count(context_meter.PANEL_START), 1)
 
-    def test_clock_process_publishes_and_keeps_running(self):
+    def test_only_same_origin_requests_get_quota_fields(self):
         with TemporaryDirectory() as temp:
-            themes = Path(temp) / "userdata" / "themes"
-            themes.mkdir(parents=True)
-            (themes / "sinnoh-lake-life.json").write_text("{}")
-            env = {**os.environ, "T3CODE_HOME": temp}
-            command = [sys.executable, "-m", "sinnoh.monitor", "--clock-only"]
-            with subprocess.Popen(command, env=env, stderr=subprocess.PIPE) as worker:
+            root = Path(temp)
+            fixture(root)
+            file = root / "caches/codex.json"
+            record = json.loads(file.read_bytes())
+            record["auth"]["private"] = "SENSITIVE_FIXTURE"
+            file.write_text(json.dumps(record), encoding="utf-8")
+            (root / "caches/acp-auth-test.json").write_text(
+                '{"instanceId":"probe","enabled":true}', encoding="utf-8",
+            )
+            with PanelServer(root, 0) as server:
+                worker = Thread(target=server.serve_forever)
+                worker.start()
+                connection = HTTPConnection(HOST, server.server_port, timeout=2)
                 try:
-                    until = time.monotonic() + 12
-                    while time.monotonic() < until:
-                        if worker.poll() is not None:
-                            self.fail(worker.stderr.read().decode(errors="replace"))
-                        if (themes / "sinnoh-lake-life.webp").is_file():
+                    self.assertTrue(panel_ready(server.server_port))
+                    connection.request("GET", PANEL_PATH)
+                    page = connection.getresponse()
+                    self.assertIn("frame-ancestors 'none'", page.getheader("Content-Security-Policy"))
+                    self.assertIn(b"Previous provider", page.read())
+                    connection.request("GET", USAGE_PATH)
+                    self.assertEqual(connection.getresponse().status, 403)
+                    connection.close()
+                    headers = {"X-Sinnoh-Panel": "1", "Sec-Fetch-Site": "cross-site"}
+                    connection.request("GET", USAGE_PATH, headers=headers)
+                    self.assertEqual(connection.getresponse().status, 403)
+                    connection.close()
+                    headers["Sec-Fetch-Site"] = "same-origin"
+                    connection.request("GET", USAGE_PATH, headers=headers | {"Host": "elsewhere"})
+                    self.assertEqual(connection.getresponse().status, 400)
+                    connection.close()
+                    connection.request("GET", USAGE_PATH, headers=headers)
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 200)
+                    self.assertIsNone(response.getheader("Access-Control-Allow-Origin"))
+                    data = response.read()
+                    self.assertNotIn(b"SENSITIVE_FIXTURE", data)
+                    providers = json.loads(data)
+                    self.assertEqual(providers[0]["id"], "codex")
+                    self.assertEqual(providers[0]["windows"][2]["used"], 75)
+                    self.assertNotIn("probe", [provider["id"] for provider in providers])
+                    connection.request("GET", "/userdata/settings.json")
+                    self.assertEqual(connection.getresponse().status, 404)
+                finally:
+                    connection.close()
+                    server.shutdown()
+                    worker.join()
+
+    def test_installed_worker_publishes_the_lake_and_stays_available(self):
+        with TemporaryDirectory() as temp:
+            directory = Path(temp)
+            themes = directory / "userdata/themes"
+            themes.mkdir(parents=True)
+            (themes / "sinnoh-lake-life.json").write_text("{}", encoding="utf-8")
+            with PanelServer(directory, 0) as reservation:
+                port = reservation.server_port
+            launch = Path(__file__).resolve().parents[1] / "launch.py"
+            (directory / launch.name).write_bytes(launch.read_bytes())
+            (directory / "install.json").write_text(
+                json.dumps({"t3_home": temp, "port": port}), encoding="utf-8",
+            )
+            env = {"PYTHONPATH": str(launch.parent)}
+            command = [sys.executable, str(directory / launch.name)]
+            with subprocess.Popen(command, env=os.environ | env, stderr=subprocess.PIPE) as worker:
+                try:
+                    until = monotonic() + 12
+                    while monotonic() < until and worker.poll() is None:
+                        if (themes / "sinnoh-lake-life.webp").is_file() and panel_ready(port):
                             break
-                        time.sleep(0.1)
+                        sleep(0.1)
                     self.assertTrue((themes / "sinnoh-lake-life.webp").is_file())
+                    self.assertTrue(panel_ready(port))
+                    self.assertIsNone(worker.poll())
                 finally:
                     if worker.poll() is None:
                         worker.terminate()
 
-    @unittest.skipUnless(os.environ.get("SINNOH_TEST_X11"), "requires an X11 display")
-    def test_x11_foreground_position_and_visibility(self):
-        from Xlib import Xatom
 
+class WindowsMigrationTest(unittest.TestCase):
+    def test_task_is_owned_only_by_current_user_and_installed_launcher(self):
+        directory = Path("Local AppData/T3 Sinnoh Lake")
+        pythonw = directory / ".venv/Scripts/pythonw.exe"
+        launcher = directory / "launch.py"
+        sid = "S-1-5-21-42"
         with TemporaryDirectory() as temp:
-            target = QWidget()
-            target.setGeometry(30, 40, 800, 600)
-            target.show()
-            self.app.processEvents()
-            follower = choose_follower(self.app)
-            self.assertIsNotNone(follower)
-            # Synthesize EWMH focus and WM_CLASS on a real X11 window.
-            window = follower.connection.create_resource_object("window", int(target.winId()))
-            prior = follower.root.get_full_property(follower.active, Xatom.WINDOW)
-            try:
-                window.set_wm_class("t3code", "T3 Code")
-                follower.root.change_property(follower.active, Xatom.WINDOW, 32, [window.id])
-                follower.connection.sync()
-                panel = Panel(Path(temp), follower)
-                panel.follow()
-                self.assertTrue(panel.isVisible())
-                self.assertEqual((panel.x(), panel.y()), (576, 424))
-                window.set_wm_class("other", "Other")
-                follower.connection.sync()
-                panel.follow()
-                self.assertFalse(panel.isVisible())
-                panel.close()
-            finally:
-                follower.root.change_property(follower.active, Xatom.WINDOW, 32,
-                                              [] if prior is None else prior.value)
-                follower.connection.flush()
-                target.close()
-
-    @unittest.skipUnless(os.environ.get("SINNOH_TEST_WAYLAND"), "requires a Wayland display")
-    def test_wayland_uses_movable_standalone(self):
-        self.assertIn("wayland", self.app.platformName())
-        self.assertIsNone(choose_follower(self.app))
+            path = Path(temp) / "test.xml"
+            windows_task(pythonw, launcher, sid).write(path, encoding="utf-16")
+            xml = path.read_bytes()
+        self.assertTrue(windows_task_owned(xml, pythonw, launcher, sid))
+        self.assertFalse(windows_task_owned(xml, pythonw, launcher, "S-1-5-21-91"))
+        self.assertFalse(windows_task_owned(xml, pythonw, launcher.with_name("other.py"), sid))
 
 
-if __name__ == "__main__":
-    unittest.main()
+@unittest.skipUnless(sys.platform == "linux", "requires Linux process handles")
+class LinuxMigrationTest(unittest.TestCase):
+    def test_stops_only_the_installed_launcher(self):
+        with TemporaryDirectory() as temp:
+            installed = Path(temp) / "launch.py"
+            other = installed.with_name("other.py")
+            for script in (installed, other):
+                script.write_text("from time import sleep\nsleep(60)\n", encoding="utf-8")
+            command = [sys.executable, str(installed)]
+            with subprocess.Popen(command) as legacy, subprocess.Popen(
+                [sys.executable, str(other)]
+            ) as unrelated:
+                try:
+                    linux_stop(command)
+                    self.assertIsNotNone(legacy.poll())
+                    self.assertIsNone(unrelated.poll())
+                finally:
+                    for worker in (legacy, unrelated):
+                        if worker.poll() is None:
+                            worker.terminate()

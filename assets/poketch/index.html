@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pokétch</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="panel.css">
+  <script type="module" src="panel.mjs"></script>
+</head>
+<body>
+  <main class="housing" aria-label="Pokétch quota monitor">
+    <div class="bezel" aria-hidden="true"></div>
+    <button class="rocker previous" id="previous" type="button" aria-label="Previous provider"
+            title="Previous provider" aria-disabled="true"><span aria-hidden="true"></span></button>
+    <button class="rocker next" id="next" type="button" aria-label="Next provider"
+            title="Next provider" aria-disabled="true"><span aria-hidden="true"></span></button>
+    <button class="lcd" id="lcd" type="button" aria-label="Providers, awaiting T3 data"
+            aria-disabled="true">
+      <span class="name" id="name">Providers</span>
+      <span class="position" id="position"></span>
+      <span class="divider"></span>
+      <span class="percent" id="percent" aria-hidden="true">—</span>
+      <span class="left">LEFT</span>
+      <span class="old" id="old" hidden>OLD</span>
+      <span class="meter" id="meter" aria-hidden="true" hidden></span>
+      <span class="window" id="window">No quota window</span>
+      <span class="pager" id="pager"></span>
+      <span class="reset" id="reset">Awaiting T3 data</span>
+    </button>
+    <span id="announcement" class="sr-only" role="status"></span>
+  </main>
+</body>
+</html>
