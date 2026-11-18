@@ -40,6 +40,18 @@ def check_port(port):
             pass
     except ConnectionRefusedError:
         return
+    except TimeoutError:
+        # Windows can take longer than the probe timeout to refuse a connection
+        # to an unused loopback port. Check whether the worker can bind there.
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            if os.name == "nt":
+                probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            try:
+                probe.bind((HOST, port))
+            except OSError:
+                pass  # An occupied port still needs the panel identity check.
+            else:
+                return
     if not panel_ready(port):
         raise RuntimeError(f"Port {port} is already in use. Choose a different --port.")
 

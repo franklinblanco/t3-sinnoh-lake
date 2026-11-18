@@ -3,6 +3,7 @@ from http.client import HTTPConnection
 import json
 import os
 from pathlib import Path
+import socket
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
@@ -13,7 +14,7 @@ from unittest.mock import patch
 
 from sinnoh import context_meter
 from sinnoh.panel import HOST, PANEL_PATH, USAGE_PATH, PanelServer
-from sinnoh.startup import linux_stop, panel_ready, windows_task, windows_task_owned
+from sinnoh.startup import check_port, linux_stop, panel_ready, windows_task, windows_task_owned
 from test_sinnoh import fixture
 
 
@@ -119,6 +120,16 @@ class PanelTest(unittest.TestCase):
 
 
 class WindowsMigrationTest(unittest.TestCase):
+    def test_port_probe_timeout_distinguishes_free_and_occupied(self):
+        with socket.socket() as listener:
+            listener.bind((HOST, 0))
+            listener.listen()
+            port = listener.getsockname()[1]
+            with patch("socket.create_connection", side_effect=TimeoutError), self.assertRaises(RuntimeError):
+                check_port(port)
+        with patch("socket.create_connection", side_effect=TimeoutError):
+            check_port(port)
+
     def test_task_is_owned_only_by_current_user_and_installed_launcher(self):
         directory = Path("Local AppData/T3 Sinnoh Lake")
         pythonw = directory / ".venv/Scripts/pythonw.exe"
