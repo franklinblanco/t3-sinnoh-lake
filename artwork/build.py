@@ -1,5 +1,6 @@
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageOps
+from cruise import LakeTraffic
 import numpy as np
 import math, struct, sys
 from io import BytesIO
@@ -16,7 +17,8 @@ parser = argparse.ArgumentParser(description="Build one lake phase from the sour
 parser.add_argument("phase", choices=["day", "night", *(
     f"{direction}{level}" for direction in ("rise", "set") for level in range(1, 9)
 )])
-parser.add_argument("--preview", type=Path, help="Save a still instead of an animated phase")
+parser.add_argument("--preview", type=Path, help="Save a still from the composed animation")
+parser.add_argument("--frame", type=int, choices=range(240), metavar="0..239", default=0)
 args = parser.parse_args()
 phase = args.phase
 mode, step = ("night",0) if phase=="night" else ("day",8) if phase=="day" else (phase[:-1],int(phase[-1]))
@@ -68,10 +70,7 @@ def scene():
     return Image.fromarray(np.uint8(np.clip(result,0,255)))
 
 lake=scene()
-if args.preview:
-    lake.thumbnail((418,236))
-    lake.save(args.preview)
-    sys.exit()
+traffic = LakeTraffic(lake, mode, step)
 waters=(0,round(H*.55),W,round(H*.87))
 water=lake.crop(waters).convert('RGBA')
 swimmers=[(129,.32,.125,.669,57,.18),(129,.48,.079,.614,38,.84),(418,.68,.114,.738,59,.57),(456,.50,.142,.792,78,.38)]
@@ -96,6 +95,7 @@ groups=[load_swimmer(s[0],s[4]) for s in swimmers]
 def render(n):
     t=n/240
     sheet=water.copy()
+    traffic.draw_boat(sheet, waters[1], t)
     for (species,center,radius,line,width,phase_offset),(frames,ends) in zip(swimmers,groups):
         angle=2*math.pi*(t+phase_offset)
         x=round(W*(center+radius*math.cos(angle)))
@@ -138,7 +138,14 @@ def render(n):
             rgb=water.getpixel((x,wy))[:3]
             col=tuple(round(mix(c,183,.31 if species!=456 else .21)) for c in rgb)
             draw.line((round(x+start*span),wy,round(x+end*span),wy),fill=col,width=2)
-    return np.array(sheet.convert("RGB"))
+    frame = lake.copy()
+    frame.paste(sheet, waters[:2])
+    traffic.sky(frame, t)
+    return frame
+
+if args.preview:
+    render(args.frame).save(args.preview)
+    sys.exit()
 
 def chunk(tag,data):
     return tag+struct.pack("<I",len(data))+data+b"\0"*(len(data)%2)
@@ -150,22 +157,26 @@ def encode(im,x=0,y=0):
 body=bytearray(chunk(b'VP8X',bytes([18,0,0,0])+u24(W-1)+u24(H-1))+chunk(b'ANIM',bytes(6)))
 prev=None
 for n in range(240):
-    rgb=render(n)
+    frame = render(n)
     if prev is None:
-        full=lake.copy();full.paste(Image.fromarray(rgb),waters[:2])
-        body.extend(encode(full))
+        body.extend(encode(frame))
     else:
-        changed=np.any(rgb!=prev,axis=2)
-        iy,ix=np.where(changed)
-        x=int(ix.min())&~1; y=(int(iy.min())+waters[1])&~1
-        sub=np.s_[y-waters[1]:iy.max()+1,x:ix.max()+1]
-        patch=Image.fromarray(rgb[sub]);patch.putalpha(Image.fromarray(changed[sub].astype('uint8')*255))
-        body.extend(encode(patch,x,y))
-    prev=rgb
+        diff = ImageChops.difference(frame, prev)
+        left, top, right, bottom = diff.getbbox()
+        # ANMF positions use two-pixel units. Unchanged pixels inside the
+        # bounding box stay transparent between the sky and water layers.
+        box = (left & ~1, top & ~1, right, bottom)
+        patch = frame.crop(box)
+        r, g, b = diff.crop(box).split()
+        mask = ImageChops.lighter(r, ImageChops.lighter(g, b)).point(lambda v: 255 if v else 0)
+        patch.putalpha(mask)
+        body.extend(encode(patch, box[0], box[1]))
+    prev = frame
 out=assets/(phase+'.webp')
 out.write_bytes(chunk(b'RIFF',b'WEBP'+body))
 with Image.open(out) as check:
     assert check.n_frames==240 and check.info['loop']==0 and out.stat().st_size<16*1024*1024
     for n in [0,60,150,239]:
-        check.seek(n); assert np.array_equal(np.array(check.convert('RGB').crop(waters)),render(n))
+        check.seek(n)
+        assert ImageChops.difference(check.convert('RGB'), render(n)).getbbox() is None
 print(phase,out.stat().st_size,flush=True)

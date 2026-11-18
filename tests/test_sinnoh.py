@@ -120,7 +120,7 @@ class SolarTest(unittest.TestCase):
             publish(night, target)
             self.assertEqual(target.read_bytes(), night.read_bytes())
 
-    def test_all_phases_are_looping_with_motion_in_the_lake(self):
+    def test_all_phases_loop_with_motion_in_the_sky_and_lake(self):
         paths = set((ASSETS / "phases").glob("*.webp"))
         self.assertEqual({path.stem for path in paths}, set(PHASES))
         for path in sorted(paths):
@@ -131,10 +131,15 @@ class SolarTest(unittest.TestCase):
                 first = image.convert("RGB")
                 image.seek(120)
                 delta = ImageChops.difference(first, image.convert("RGB"))
-                self.assertIsNotNone(delta.getbbox())
-                x0, y0, x1, y1 = delta.getbbox()
-                self.assertGreaterEqual(y0, round(image.height * 0.55))
-                self.assertLessEqual(y1, round(image.height * 0.87))
+                w, h = image.size
+                for name, box in [
+                    ("flock", (0, 0, w, round(h * .30))),
+                    ("boat at start", (round(w * .56), round(h * .55), round(w * .67), round(h * .67))),
+                    ("swimmers", (0, round(h * .69), w, round(h * .87))),
+                ]:
+                    self.assertIsNotNone(delta.crop(box).getbbox(), name)
+                self.assertIsNone(delta.crop((0, round(h * .38), w, round(h * .51))).getbbox())
+                self.assertIsNone(delta.crop((0, round(h * .87), w, h)).getbbox())
 
 
 if __name__ == "__main__":

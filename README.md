@@ -1,6 +1,6 @@
 # T3 Sinnoh Lake
 
-Sinnoh Rift · Lake Life brings an animated pixel-art lake to the T3 Code conversation pane. The artwork includes submerged Magikarp, Buizel and Finneon. Pokétch is a separate green LCD that reads quota from the same desktop user's T3 Code provider caches.
+Sinnoh Rift · Lake Life brings an animated pixel-art lake to the T3 Code conversation pane. The artwork includes submerged Magikarp, Buizel and Finneon. Starly, Staravia and Staraptor fly in formation while Wingull, Zubat and Drifloon follow their own paths. Turtwig, Chimchar and Piplup cruise past in a wooden boat. Pokétch is a separate green LCD that reads quota from the same desktop user's T3 Code provider caches.
 
 ## Install
 
