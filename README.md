@@ -21,6 +21,7 @@ The default T3 data directory is `~/.t3`. Set `T3CODE_HOME` or pass `--t3-home P
 - Press the upper or lower red button to move between provider instances. The monitor includes every configured instance and enabled built-in providers discovered in T3 Code's caches.
 - **LEFT** and the meter show `100 − usedPercent`. The initial window is the tightest valid quota. Click the LCD to cycle through all reported windows. Reset times use the desktop's locale and time zone.
 - Quota expires at its reported reset until T3 supplies a new snapshot. Unknown quota is a dash with no meter. A valid exhausted window shows **0%** and an empty meter. Disabled, signed-out, unsupported and failed checks have their own status.
+- A ring to the left of the composer model picker shows the active thread’s context usage. Hover over it for the percentage used. It refreshes once a minute from T3’s local provider-thread snapshot. When T3 has no context measurement, the tooltip shows “Context usage unavailable.”
 - The solar clock checks the system time zone every minute. It uses the zone's representative IANA city, including mappings from Windows zone names. Fixed-offset zones use the corresponding equatorial meridian. It swaps among 18 complete 24-second WebP loops using solar altitude and whether the sun is rising or setting. T3 Code reloads the image from its watched theme directory.
 
 ## Verify and rebuild

@@ -9,6 +9,7 @@ from astral import Observer
 from astral.sun import elevation
 from tzlocal import reload_localzone
 
+from .context_meter import sync as sync_context_meter
 from .paths import ASSETS, THEME_ID, atomic_write, t3_home
 
 LIMITS = (-10, -7.5, -5.5, -3.5, -1.6, 0.8, 3.5, 7, 12)
@@ -71,6 +72,7 @@ def sync(root=None, *, status_only=False, force=False, now=None):
     target = root / "userdata" / "themes" / f"{THEME_ID}.webp"
     if not status_only and target.with_suffix(".json").is_file():
         publish(ASSETS / "phases" / f"{phase}.webp", target, force=force)
+        sync_context_meter(root)
     return f"{zone.key} ({observer.latitude:.3f}, {observer.longitude:.3f}), {phase}"
 
 
