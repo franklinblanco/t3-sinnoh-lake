@@ -42,34 +42,30 @@ class PanelTest(unittest.TestCase):
             self.assertNotIn("\\", css)
             self.assertEqual(css.count(context_meter.PANEL_START), 1)
 
-    def test_theme_css_has_no_scroll_controls_or_head_overrides(self):
+    def test_theme_css_avoids_crashing_scroll_pseudo_elements(self):
         forbidden = (
             "scroll-marker",
             "scroll-marker-group",
             "scroll-button",
-            "scroll-timeline",
-            "timeline-scope",
             "scroll-state",
             "if(style(",
-            "> head",
-            "head >",
-            "head::",
-            "meta[",
-            "link[",
         )
         with TemporaryDirectory() as temp:
             root = Path(temp)
             single_css = poketch_theme.styles(root, 47984)
             self.assertIn("--sinnoh-faces: 1;", single_css)
+            self.assertIn("display: none !important;", single_css)
             self.assertIn("animation: none;", single_css)
-            self.assertNotIn("@keyframes sinnoh-cycle", single_css)
+            self.assertNotIn("@keyframes sinnoh-readout", single_css)
             for token in forbidden:
                 self.assertNotIn(token, single_css)
 
             fixture(root)
             multi_css = poketch_theme.styles(root, 47984)
-            self.assertIn("@keyframes sinnoh-cycle", multi_css)
-            self.assertIn("steps(1, end) infinite;", multi_css)
+            self.assertIn("@keyframes sinnoh-readout", multi_css)
+            self.assertIn("scroll-timeline: --sinnoh-face-y y !important;", multi_css)
+            self.assertIn("::-webkit-scrollbar-button:vertical:start:decrement", multi_css)
+            self.assertIn("::-webkit-scrollbar-button:vertical:end:increment", multi_css)
             self.assertIn("pointer-events: none;", multi_css)
             self.assertNotIn("\\", multi_css)
             for token in forbidden:
@@ -101,10 +97,10 @@ class PanelTest(unittest.TestCase):
 
             poketch_dest = Path(temp) / "poketch"
             poketch_dest.mkdir()
-            (poketch_dest / "mini.svg").write_text("<svg/>", encoding="utf-8")
+            (poketch_dest / "stale.svg").write_text("<svg/>", encoding="utf-8")
             install.copy_tree(ASSETS / "poketch", poketch_dest)
-            self.assertFalse((ASSETS / "poketch" / "mini.svg").exists())
-            self.assertFalse((poketch_dest / "mini.svg").exists())
+            self.assertTrue((poketch_dest / "mini.svg").is_file())
+            self.assertFalse((poketch_dest / "stale.svg").exists())
 
     def test_only_same_origin_requests_get_quota_fields(self):
         with TemporaryDirectory() as temp:

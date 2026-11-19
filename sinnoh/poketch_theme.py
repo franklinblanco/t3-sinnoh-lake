@@ -1,4 +1,4 @@
-"""Render quota snapshots as a 1D SVG sprite with auto-cycling CSS keyframes."""
+"""Render quota snapshots as a 1D SVG sprite with clickable scroll-timeline CSS."""
 from datetime import datetime, timedelta, timezone
 import json
 import math
@@ -10,7 +10,6 @@ from .paths import ASSETS
 from .usage import read_providers
 
 CHAT = ':root:has([data-chat-canvas]:not([data-slot="sidebar-inset"][inert] *))'
-SECONDS_PER_FACE = 5
 ASSET_DIR = ASSETS / "poketch"
 SPEC = json.loads((ASSET_DIR / "spec.json").read_text(encoding="utf-8"))
 LCD_WIDTH = SPEC["lcd"]["width"]
@@ -20,6 +19,16 @@ STALE_MINUTES = SPEC["staleMinutes"]
 SEGMENTS = tuple(tuple(segment) for segment in SPEC["segments"])
 DIGITS = tuple(SPEC["digitMasks"])
 CONTROL = re.compile(r"[\x00-\x1f\ud800-\udfff\ufffe\uffff]")
+HIDE_SVG = (
+    "<svg xmlns='http://www.w3.org/2000/svg' width='22' height='14' viewBox='0 0 22 14'>"
+    "<rect x='.5' y='.5' width='21' height='13' rx='3.5' fill='#252834' fill-opacity='.85' stroke='#596075'/>"
+    "<path fill='#c7d9c0' d='M7 6h8v2H7z'/></svg>"
+)
+HIDE_HOVER_SVG = (
+    "<svg xmlns='http://www.w3.org/2000/svg' width='22' height='14' viewBox='0 0 22 14'>"
+    "<rect x='.5' y='.5' width='21' height='13' rx='3.5' fill='#383b46' stroke='#7a839e'/>"
+    "<path fill='#ffffff' d='M7 6h8v2H7z'/></svg>"
+)
 
 
 def image(svg):
@@ -114,15 +123,14 @@ def sprite(faces):
                  + "".join(faces) + "</g></svg>")
 
 
-def cycle_keyframes(descriptions):
+def readout_keyframes(descriptions):
     if len(descriptions) < 2:
         return ""
-    total = len(descriptions)
-    lines = ["@keyframes sinnoh-cycle {"]
+    last = len(descriptions) - 1
+    lines = ["@keyframes sinnoh-readout {"]
     for index, label in enumerate(descriptions):
-        pct = "0%, 100%" if index == 0 else f"{index * 100 / total:.4f}%"
-        pos = "0 0" if index == 0 else f"calc(-{index} * var(--sinnoh-lcd-w)) 0"
-        lines.append(f'  {pct} {{ background-position: {pos}; content: "" / {label}; }}')
+        pct = "0%" if index == 0 else "100%" if index == last else f"{index * 100 / last:.4f}%"
+        lines.append(f'  {pct} {{ content: "" / {label}; }}')
     lines.append("}")
     return "\n".join(lines) + "\n\n"
 
@@ -144,15 +152,22 @@ def styles(root, port, now=None):
     urls = {url, "http://127.0.0.1:47984/poketch/"}
     legacy = ', '.join(f'[src="{u}"]' for u in sorted(urls))
     viewport = '[data-preview-viewport][style*="z-index: 48;"]'
-    animation = f"sinnoh-cycle {face_count * SECONDS_PER_FACE}s steps(1, end) infinite" if face_count > 1 else "none"
+    readout_animation = (
+        "animation: sinnoh-readout 1s linear both;\n    animation-timeline: --sinnoh-face-y;"
+        if face_count > 1 else "animation: none;"
+    )
     substitutions = {
-        "KEYFRAMES": cycle_keyframes(descriptions),
+        "KEYFRAMES": readout_keyframes(descriptions),
         "CHAT": CHAT,
         "FACE_COUNT": str(face_count),
+        "ROCKER_DISPLAY": "block" if face_count > 1 else "none",
         "HOUSING": image((ASSET_DIR / "housing.svg").read_text(encoding="utf-8")),
+        "MINI": image((ASSET_DIR / "mini.svg").read_text(encoding="utf-8")),
+        "HIDE_ICON": image(HIDE_SVG),
+        "HIDE_HOVER_ICON": image(HIDE_HOVER_SVG),
         "INITIAL_DESCRIPTION": descriptions[0],
         "FACES": sprite(faces),
-        "ANIMATION": animation,
+        "READOUT_ANIMATION": readout_animation,
         "FLOAT": viewport,
         "LEGACY_GUEST": f'webview:is({legacy}):not([aria-hidden="true"])',
     }

@@ -56,6 +56,7 @@ let browser;
 try {
   browser = await chromium.launch({
     executablePath: process.env.SINNOH_CHROMIUM || undefined,
+    ignoreDefaultArgs: ["--hide-scrollbars"],
   });
   const page = await browser.newPage();
   for (const [label, width, height, deviceWidth] of [
@@ -132,8 +133,7 @@ with patch("sinnoh.poketch_theme.read_providers", return_value=providers):
   for (const stylesheet of [css, singleCss]) {
     for (const forbidden of [
       "scroll-marker", "scroll-marker-group", "scroll-button",
-      "scroll-timeline", "timeline-scope", "scroll-state",
-      "if(style(", "> head", "head >", "head::",
+      "scroll-state", "if(style(",
     ]) {
       assert.equal(stylesheet.includes(forbidden), false, `Forbidden token found: ${forbidden}`);
     }
@@ -176,10 +176,13 @@ with patch("sinnoh.poketch_theme.read_providers", return_value=providers):
     return {
       beforePointer: before.pointerEvents,
       afterPointer: after.pointerEvents,
+      beforeOpacity: before.opacity,
+      afterOpacity: after.opacity,
       beforeBg: before.backgroundImage,
       afterBg: after.backgroundImage,
       beforeContent: before.content,
       afterContent: after.content,
+      afterPos: after.backgroundPosition,
     };
   });
 
@@ -190,7 +193,7 @@ with patch("sinnoh.poketch_theme.read_providers", return_value=providers):
   assert.match(initial.afterBg, /data:image\/svg\+xml/);
   assert.match(initial.afterContent, /Codex, Weekly, 0% remaining/);
 
-  // Clicks over the Pokétch pass straight through to underlying UI.
+  // Clicks over the LCD pass straight through to underlying UI.
   await page.evaluate(() => {
     window.__asideClicks = 0;
     document.querySelector("aside").addEventListener("click", () => { window.__asideClicks += 1; });
@@ -198,19 +201,28 @@ with patch("sinnoh.poketch_theme.read_providers", return_value=providers):
   await page.mouse.click(1100 - 14 - 120, 780 - 90 - 60);
   assert.equal(await page.evaluate(() => window.__asideClicks), 1);
 
-  // Pressing Tab never focuses <head> or its metadata children.
+  // Tabbing onto <meta> scroll controls + replacing/clearing adoptedStyleSheets never crashes Chromium.
   await page.evaluate(() => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   });
   const tabSequence = [];
-  for (let i = 0; i < 4; i += 1) {
+  for (let i = 0; i < 6; i += 1) {
     await page.keyboard.press("Tab");
     const active = await page.evaluate(() => document.activeElement?.tagName ?? null);
-    assert.ok(!["HEAD", "META", "TITLE", "LINK"].includes(active), `Unexpected head focus: ${active}`);
     tabSequence.push(active);
+    if (active === "META") {
+      await page.evaluate((text) => {
+        const sheet = document.adoptedStyleSheets[0];
+        sheet.replaceSync("");
+        void document.activeElement;
+        sheet.replaceSync(text);
+        void document.activeElement;
+      }, css);
+    }
     if (active === "BUTTON") break;
   }
-  assert.deepEqual(tabSequence.filter((tag) => tag !== "BODY"), ["TEXTAREA", "BUTTON"]);
+  assert.equal(crashed, false);
+  assert.ok(tabSequence.includes("TEXTAREA") && tabSequence.includes("BUTTON"), `Unexpected Tab sequence: ${tabSequence}`);
 
   await page.locator("#draft").fill("Unsent draft");
 
@@ -243,8 +255,9 @@ with patch("sinnoh.poketch_theme.read_providers", return_value=providers):
     [deviceWidth, deviceWidth * 126 / 240, 14, 90].forEach((expected, index) => near(box[index], expected));
   }
 
-  // Auto-cycling across all 6 faces via @keyframes steps(1, end).
+  // Clickable UP/DOWN red rocker buttons step through all 6 faces without stealing focus.
   await page.setViewportSize({ width: 1100, height: 780 });
+  await page.locator("#draft").focus();
   const expectedFaces = [
     { pos: "0px 0px", text: "Codex, Weekly, 0% remaining" },
     { pos: "-186px 0px", text: "Codex, Daily, 70% remaining" },
@@ -253,73 +266,118 @@ with patch("sinnoh.poketch_theme.read_providers", return_value=providers):
     { pos: "-744px 0px", text: "Third, Daily, 70% remaining" },
     { pos: "-930px 0px", text: "Third, Expired, Quota remaining unknown, Awaiting reset update" },
   ];
-  const cycleFrames = await page.evaluate((count) => {
-    const anim = document.getAnimations().find((a) => a.animationName === "sinnoh-cycle");
-    if (!anim) return null;
-    const timing = anim.effect.getTiming();
-    const timingFn = getComputedStyle(document.documentElement, "::after").animationTimingFunction;
-    anim.pause();
-    const samples = [];
-    for (let i = 0; i < count; i += 1) {
-      anim.currentTime = (i + 0.5) * 5000;
-      const cs = getComputedStyle(document.documentElement, "::after");
-      samples.push({ pos: cs.backgroundPosition, content: cs.content });
-    }
-    return { duration: timing.duration, timingFn, samples };
-  }, expectedFaces.length);
-  assert.ok(cycleFrames, "Expected sinnoh-cycle animation");
-  assert.equal(cycleFrames.duration, expectedFaces.length * 5000);
-  assert.match(cycleFrames.timingFn, /^steps\(1(, end)?\)$/);
-  expectedFaces.forEach((expected, index) => {
-    assert.equal(cycleFrames.samples[index].pos, expected.pos);
-    assert.ok(cycleFrames.samples[index].content.includes(expected.text),
-      `Face ${index}: ${cycleFrames.samples[index].content}`);
+  const rockerBox = await page.evaluate(() => {
+    const r = document.querySelector('meta[name="viewport"]').getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
   });
+  near(rockerBox.width, 29);
+  near(rockerBox.height, 89);
 
-  // Verify real-time playback advances from face 0 to face 1 automatically.
-  await page.evaluate(() => {
-    const anim = document.getAnimations().find((a) => a.animationName === "sinnoh-cycle");
-    anim.currentTime = 0;
-    anim.playbackRate = 25;
-    anim.play();
+  await page.waitForTimeout(100);
+  for (let i = 1; i < expectedFaces.length; i += 1) {
+    await page.mouse.click(rockerBox.x + rockerBox.width / 2, rockerBox.y + rockerBox.height * 0.75);
+    await page.waitForFunction(
+      (expectedTop) => document.querySelector('meta[name="viewport"]').scrollTop === expectedTop,
+      i * 40,
+      { timeout: 2_000 },
+    );
+    const current = await housingStyle();
+    assert.equal(current.afterPos, expectedFaces[i].pos);
+    assert.ok(current.afterContent.includes(expectedFaces[i].text), `Down #${i}: ${current.afterContent}`);
+    assert.equal(await page.evaluate(() => document.activeElement?.id), "draft");
+    await page.waitForTimeout(60);
+  }
+
+  // Step back UP two faces.
+  for (const target of [4, 3]) {
+    await page.mouse.click(rockerBox.x + rockerBox.width / 2, rockerBox.y + rockerBox.height * 0.25);
+    await page.waitForFunction(
+      (expectedTop) => document.querySelector('meta[name="viewport"]').scrollTop === expectedTop,
+      target * 40,
+      { timeout: 2_000 },
+    );
+    const current = await housingStyle();
+    assert.equal(current.afterPos, expectedFaces[target].pos);
+    assert.ok(current.afterContent.includes(expectedFaces[target].text), `Up -> ${target}: ${current.afterContent}`);
+    assert.equal(await page.evaluate(() => document.activeElement?.id), "draft");
+    await page.waitForTimeout(60);
+  }
+
+  // Clickable collapse ("-") and expand (mini Pokétch) toggle preserves selected face and focus.
+  await page.waitForTimeout(150);
+  const hideBox = await page.evaluate(() => {
+    const r = document.querySelector("meta[charset]").getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
   });
+  await page.mouse.click(hideBox.x + hideBox.width / 2, hideBox.y + hideBox.height / 2);
   await page.waitForFunction(
-    () => getComputedStyle(document.documentElement, "::after").content.includes("Codex, Daily, 70% remaining"),
+    () => document.querySelector("meta[charset]").scrollTop === 40,
     null,
-    { timeout: 4_000 },
+    { timeout: 2_000 },
   );
+  assert.equal((await housingStyle()).beforeOpacity, "0");
+  const miniBox = await page.evaluate(() => {
+    const r = document.querySelector("meta[charset]").getBoundingClientRect();
+    return {
+      x: r.x,
+      y: r.y,
+      width: r.width,
+      height: r.height,
+      rockerVis: getComputedStyle(document.querySelector('meta[name="viewport"]')).visibility,
+      active: document.activeElement?.id,
+    };
+  });
+  near(miniBox.width, 44);
+  near(miniBox.height, 24);
+  assert.equal(miniBox.rockerVis, "hidden");
+  assert.equal(miniBox.active, "draft");
 
-  // Clearing and replacing adoptedStyleSheets + reading document.activeElement never crashes.
-  await page.locator("#draft").focus();
+  // Live CSS refresh while collapsed keeps collapsed state + face, and clearing/restoring never crashes.
   const sheetLifecycle = await page.evaluate(({ singleCss, updatedCss, fullCss }) => {
     const sheet = document.adoptedStyleSheets[0];
     const log = [];
-    sheet.replaceSync("");
-    log.push(document.activeElement?.tagName ?? null);
-    sheet.replaceSync(singleCss);
-    const singleAnim = getComputedStyle(document.documentElement, "::after").animationName;
-    const singleContent = getComputedStyle(document.documentElement, "::after").content;
-    log.push(document.activeElement?.tagName ?? null);
     sheet.replaceSync(updatedCss);
-    const updatedContent = getComputedStyle(document.documentElement, "::after").content;
-    log.push(document.activeElement?.tagName ?? null);
+    const afterUpdate = {
+      opacity: getComputedStyle(document.documentElement, "::before").opacity,
+      pos: getComputedStyle(document.documentElement, "::after").backgroundPosition,
+      active: document.activeElement?.id,
+    };
     sheet.replaceSync("");
-    log.push(document.activeElement?.tagName ?? null);
+    log.push(document.activeElement?.id ?? null);
+    sheet.replaceSync(singleCss);
+    const singleRockerDisplay = getComputedStyle(document.querySelector('meta[name="viewport"]')).display;
+    const singleContent = getComputedStyle(document.documentElement, "::after").content;
+    log.push(document.activeElement?.id ?? null);
     sheet.replaceSync(fullCss);
-    log.push(document.activeElement?.tagName ?? null);
-    return { log, singleAnim, singleContent, updatedContent };
+    log.push(document.activeElement?.id ?? null);
+    return { log, afterUpdate, singleRockerDisplay, singleContent };
   }, {
     singleCss,
     updatedCss: css.replaceAll("70% remaining", "69% remaining"),
     fullCss: css,
   });
   assert.equal(crashed, false);
-  assert.deepEqual(sheetLifecycle.log, ["TEXTAREA", "TEXTAREA", "TEXTAREA", "TEXTAREA", "TEXTAREA"]);
-  assert.equal(sheetLifecycle.singleAnim, "none");
+  assert.equal(sheetLifecycle.afterUpdate.opacity, "0");
+  assert.equal(sheetLifecycle.afterUpdate.pos, expectedFaces[3].pos);
+  assert.equal(sheetLifecycle.afterUpdate.active, "draft");
+  assert.deepEqual(sheetLifecycle.log, ["draft", "draft", "draft"]);
+  assert.equal(sheetLifecycle.singleRockerDisplay, "none");
   assert.match(sheetLifecycle.singleContent, /Providers, No quota window, Quota remaining unknown/);
-  assert.match(sheetLifecycle.updatedContent, /Codex, Weekly, 0% remaining/);
 
-  // Legacy floating Browser suppression and independence from <head> metadata tags.
+  // Expand back from the preserved collapsed state via mini Pokétch badge click.
+  await page.waitForTimeout(150);
+  await page.mouse.click(miniBox.x + miniBox.width / 2, miniBox.y + miniBox.height / 2);
+  await page.waitForFunction(
+    () => document.querySelector("meta[charset]").scrollTop === 0,
+    null,
+    { timeout: 2_000 },
+  );
+  const expanded = await housingStyle();
+  assert.equal(expanded.beforeOpacity, "1");
+  assert.equal(expanded.afterPos, expectedFaces[3].pos);
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "draft");
+
+  // Legacy floating Browser suppression and independence from optional <head> tags.
   const migration = await page.evaluate(() => {
     const canvas = document.querySelector("[data-chat-canvas]");
     canvas.innerHTML = '<section data-preview-mini-player="browser:legacy">Old panel</section>';
@@ -351,5 +409,5 @@ with patch("sinnoh.poketch_theme.read_providers", return_value=providers):
     stillActive: [true, "0"],
   });
   assert.equal(crashed, false);
-  console.log("Renderer-wide panel: auto-cycling faces, pass-through clicks, Tab safety, adoptedStyleSheets replaceSync stability, scale, inert and legacy scope");
+  console.log("Renderer-wide panel: clickable rocker + collapse, LCD pass-through, Tab/focus safety, adoptedStyleSheets replaceSync stability, scale, inert and legacy scope");
 }

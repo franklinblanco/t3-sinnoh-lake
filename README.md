@@ -18,19 +18,19 @@ The default T3 data directory is `~/.t3`. Set `T3CODE_HOME` or pass `--t3-home P
 
 ## Pokétch in chat
 
-Select **Sinnoh Rift · Lake Life** in **Settings → Appearance**. Pokétch appears as soon as T3 renders any existing chat or new draft, including chats on linked environments. It hides on non-chat screens and when the T3 window is minimized or closed. Clicks pass straight through the overlay to the chat beneath it (`pointer-events: none`), and it never enters Tab focus order.
+Select **Sinnoh Rift · Lake Life** in **Settings → Appearance**. Pokétch appears as soon as T3 renders any existing chat or new draft, including chats on linked environments. It hides on non-chat screens and when the T3 window is minimized or closed. Clicks over the LCD pass straight through to the chat beneath it (`pointer-events: none`), and clicking the red buttons or collapse toggle never steals focus from the chat composer.
 
 Pokétch floats 14 px from the right edge and 90 px from the bottom of the T3 viewport. Its reference size is 240 × 126 px at T3’s default window size. The whole device scales down in compact windows and up in larger ones.
 
 The update hides the old floating Pokétch when its tab is on the installed loopback URL. The tab remains available in the right panel and you can close it there. Docked tabs and other Browser pages retain their layout.
 
-The in-chat overlay uses standard T3 theme CSS (`@keyframes` with `steps(1, end)`) and was tested in T3 Nightly `0.1.11-nightly.20261118.4890`. For manual interactive stepping, open the installer’s loopback URL in the thread’s docked **Browser** panel or in a regular browser tab. [T3 theme CSS documentation](https://github.com/pingdotgg/t3code/blob/8cf97b5f06f30a872ce30ab8a888f2ff012365a2/docs/user/appearance.md#custom-css)
+The in-chat controls use CSS `scroll-timeline` driven by non-focusable `::-webkit-scrollbar-button` steppers (avoiding Chromium’s `::scroll-marker` / `::scroll-button()` crash) and were tested in T3 Nightly `0.1.11-nightly.20261118.4890`. The standalone panel also remains available at the installer’s loopback URL in the docked **Browser** panel or a regular browser tab. [T3 theme CSS documentation](https://github.com/pingdotgg/t3code/blob/8cf97b5f06f30a872ce30ab8a888f2ff012365a2/docs/user/appearance.md#custom-css)
 
 The worker reads the provider instance configuration and cached quota fields on the machine where it runs. It updates the displayed quota through the published theme, so a theme export or a client following that environment theme receives the display values. The standalone panel and its read-only quota endpoint bind to IPv4 loopback.
 
 ## Quota, context and local time
 
-- When multiple providers or quota windows are available, the in-chat Pokétch automatically cycles through every configured provider instance (and any enabled built-ins present in T3’s cache) and all reported quota windows every 5 seconds per face; when only one face is present, it stays static.
+- Click the Pokétch’s red **UP** and **DOWN** buttons (or scroll with the mouse wheel / trackpad over them) to step through every configured provider instance and reported quota window. Click the small **−** pill above the top-right edge to collapse Pokétch into a compact badge, and click the badge to expand it again.
 - **LEFT** and the meter show remaining quota. Each provider begins on its tightest valid quota window before advancing through its remaining windows. The theme uses the worker’s local time zone for reset times.
 - Expired quota values are hidden until T3 reports a new snapshot, showing **Awaiting reset update**. Unknown quota shows a dash. A valid exhausted window shows **0%** and an empty meter.
 - Hover over the ring to the left of the composer’s model picker for the thread’s context percentage. Linked machines use the latest reading T3 Desktop received, including last-known data when a machine goes offline. The theme prioritizes recent and active threads within T3’s stylesheet size limit.
