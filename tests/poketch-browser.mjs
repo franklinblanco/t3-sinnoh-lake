@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 
 const { chromium } = createRequire(import.meta.url)("playwright-core");
 const assets = new URL("../assets/poketch/", import.meta.url);
-const mimeTypes = { ".html": "text/html", ".css": "text/css", ".mjs": "text/javascript" };
+const mimeTypes = { ".html": "text/html", ".css": "text/css", ".mjs": "text/javascript", ".json": "application/json" };
 const quotas = [
   { id: "codex", name: "Codex", windows: [
     { id: "week", label: "Weekly", used: 100, reset: null },
@@ -40,7 +40,7 @@ const server = createServer(async (request, response) => {
   } else {
     const name = request.url.slice("/poketch/".length) || "index.html";
     const extension = name.slice(name.lastIndexOf("."));
-    if (!["index.html", "panel.css", "panel.mjs", "model.mjs"].includes(name)) {
+    if (!["index.html", "panel.css", "panel.mjs", "model.mjs", "spec.json"].includes(name)) {
       response.writeHead(404).end();
       return;
     }
@@ -130,8 +130,8 @@ with patch("sinnoh.poketch_theme.read_providers", return_value=providers):
     <html>
       <head>
         <meta charset="utf-8"><meta name="viewport" content="width=device-width">
-        <meta name="theme-color" content="#000000"><link rel="apple-touch-icon" href="data:,">
-        <title>T3 Code</title>
+        <meta name="theme-color" content="#000000"><link rel="icon" href="data:,">
+        <link rel="apple-touch-icon" href="data:,"><title>T3 Code</title>
       </head>
       <body>
         <main data-slot="sidebar-inset" style="position:relative;z-index:0;min-height:100vh">
@@ -147,19 +147,28 @@ with patch("sinnoh.poketch_theme.read_providers", return_value=providers):
     document.adoptedStyleSheets = [theme];
   }, css);
   const readout = () => page.evaluate(() => getComputedStyle(document.documentElement, "::after").content);
+  const housingVisibility = () => page.evaluate(() => getComputedStyle(document.documentElement, "::before").visibility);
   const waitForReadout = (text) => page.waitForFunction(
     (text) => getComputedStyle(document.documentElement, "::after").content.includes(text),
     text, { timeout: 4_000 },
   );
-  const click = async (control, expected) => {
-    // Click native generated buttons or the marker at the same point on wrap.
+  const clickPoint = async (control) => {
     const { width, height } = page.viewportSize();
     const size = await page.evaluate(
       () => parseFloat(getComputedStyle(document.documentElement, "::before").width),
     );
     const scale = size / 240;
-    const [x, y] = { previous: [222, 40], next: [222, 85], lcd: [106, 63] }[control];
-    await page.mouse.click(width - 14 - (240 - x) * scale, height - 90 - (126 - y) * scale);
+    const coords = {
+      previous: [width - 14 - (240 - 222) * scale, height - 90 - (126 - 40) * scale],
+      next: [width - 14 - (240 - 222) * scale, height - 90 - (126 - 85) * scale],
+      lcd: [width - 14 - (240 - 106) * scale, height - 90 - (126 - 63) * scale],
+      hide: [width - 14 - 39 * scale, height - 90 - 123 * scale],
+      show: [width - 14 - 22, height - 90 - 12],
+    }[control];
+    await page.mouse.click(coords[0], coords[1]);
+  };
+  const click = async (control, expected) => {
+    await clickPoint(control);
     await waitForReadout(expected);
   };
   assert.match(await readout(), /Codex, Weekly, 0% remaining/);
@@ -201,11 +210,39 @@ with patch("sinnoh.poketch_theme.read_providers", return_value=providers):
     [deviceWidth, deviceWidth * 126 / 240, 14, 90].forEach((expected, index) => near(box[index], expected));
     assert.match(await readout(), /Third, Weekly, 0% remaining/);
   }
+  await page.setViewportSize({ width: 1100, height: 780 });
   await click("lcd", "Third, Daily, 70% remaining");
   await page.evaluate((css) => {
     document.adoptedStyleSheets[0].replaceSync(css.replaceAll("70% remaining", "69% remaining"));
   }, css);
   await waitForReadout("Third, Daily, 69% remaining");
+
+  // Collapse Pokétch: full housing hides, clicks pass through to underlying preview, and Show restores state.
+  await page.evaluate(() => {
+    window.__asideClicks = 0;
+    document.querySelector("aside").addEventListener("click", () => { window.__asideClicks += 1; });
+  });
+  await clickPoint("hide");
+  await page.waitForFunction(() => getComputedStyle(document.documentElement, "::before").visibility === "hidden",
+    null, { timeout: 4_000 });
+  assert.equal(await housingVisibility(), "hidden");
+  await clickPoint("lcd");
+  assert.equal(await page.evaluate(() => window.__asideClicks), 1);
+  assert.match(await readout(), /Third, Daily, 69% remaining/);
+  await clickPoint("show");
+  await page.waitForFunction(() => getComputedStyle(document.documentElement, "::before").visibility === "visible",
+    null, { timeout: 4_000 });
+  assert.match(await readout(), /Third, Daily, 69% remaining/);
+
+  // Reversed <meta> tag order in <head> still keeps upper=Previous and lower=Next on wrap.
+  await page.evaluate(() => {
+    const head = document.head;
+    const charset = head.querySelector("meta[charset]");
+    const viewport = head.querySelector('meta[name="viewport"]');
+    head.insertBefore(viewport, charset);
+  });
+  await click("next", "Codex, Weekly, 0% remaining");
+  await click("previous", "Third, Weekly, 0% remaining");
 
   const migration = await page.evaluate(() => {
     const canvas = document.querySelector("[data-chat-canvas]");
@@ -226,8 +263,17 @@ with patch("sinnoh.poketch_theme.read_providers", return_value=providers):
     floating.firstChild.setAttribute("src", "about:blank");
     const unrelated = [getComputedStyle(shell).visibility, getComputedStyle(floating).opacity,
       getComputedStyle(docked).opacity];
-    return { hidden, unrelated };
+    // Removing a required head host disarms the CSS Pokétch so the fallback panel is not hidden.
+    floating.firstChild.setAttribute("src", url);
+    document.head.querySelector('link[rel="apple-touch-icon"]').remove();
+    const degraded = [getComputedStyle(document.documentElement, "::after").content,
+      getComputedStyle(floating).opacity];
+    return { hidden, unrelated, degraded };
   });
-  assert.deepEqual(migration, { hidden: ["hidden", "0"], unrelated: ["visible", "1", "1"] });
-  console.log("Renderer-wide panel: instant routes, native wrapping, scale, draft and legacy scope");
+  assert.deepEqual(migration, {
+    hidden: ["hidden", "0"],
+    unrelated: ["visible", "1", "1"],
+    degraded: ["none", "1"],
+  });
+  console.log("Renderer-wide panel: instant routes, collapse toggle, native wrapping, scale, draft and legacy scope");
 }

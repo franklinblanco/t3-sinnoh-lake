@@ -111,6 +111,17 @@ def recent_visits(db, records, store, db_id, blob_dir, local_env):
     return visits
 
 
+def raw_records(db, store_path):
+    """Prefer CCL's cached raw records, falling back to public RawLevelDb if removed."""
+    cached = getattr(db, "_fetched_records", None)
+    if cached is not None:
+        return cached
+    from ccl_chromium_reader import ccl_leveldb
+
+    with ccl_leveldb.RawLevelDb(store_path) as raw_db:
+        return list(raw_db.iterate_records_raw())
+
+
 def remote_rows(root, local_env):
     from ccl_chromium_reader import ccl_chromium_indexeddb as idb
 
@@ -141,11 +152,11 @@ def remote_rows(root, local_env):
         data = db.make_prefix(db_id, store, 1)
         blobs = db.make_prefix(db_id, store, 3)
         # CCL's public iterator decodes historical values before yielding their
-        # sequence numbers. Reconcile its raw records first to avoid stale readings.
+        # sequence numbers. Reconcile raw LevelDB records first to avoid stale readings.
         prefixes = [data, blobs]
         if "shell" in stores:
             prefixes.extend(db.make_prefix(db_id, stores["shell"], typ) for typ in (1, 3))
-        records = latest_records(db._fetched_records, tuple(prefixes))
+        records = latest_records(raw_records(db, store_path), tuple(prefixes))
         visits = (recent_visits(db, records, stores["shell"], db_id, blob_dir, local_env)
                   if "shell" in stores else {})
         for raw, rec in records.items():

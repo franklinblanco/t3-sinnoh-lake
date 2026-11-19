@@ -1,8 +1,9 @@
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
-from sinnoh.context_meter import meter_css
-from sinnoh.remote_context import latest_records, snapshot_percent
+from sinnoh.context_meter import MAX_THREADS, METER_BUDGET, meter_css
+from sinnoh.remote_context import latest_records, raw_records, snapshot_percent
 
 
 class LinkedContextTest(unittest.TestCase):
@@ -47,3 +48,38 @@ class LinkedContextTest(unittest.TestCase):
             self.assertIn(f'"{percent}% of context used"', css)
         self.assertNotIn('older', css)
         self.assertLessEqual(len(css.encode()), budget)
+
+    def test_context_meter_respects_max_threads_and_budget_cap(self):
+        rows = [(env, f"thread-{i}", (i * 7) % 101)
+                for env in ("mac", "win") for i in range(MAX_THREADS)]
+        css = meter_css(rows, METER_BUDGET)
+        self.assertLessEqual(len(css.encode()), METER_BUDGET)
+        self.assertLessEqual(css.count("[data-sidebar-row="), MAX_THREADS)
+        self.assertIn('[data-sidebar-row="mac:thread-0"]', css)
+        self.assertIn('[data-sidebar-row="win:thread-0"]', css)
+        self.assertNotIn(f'thread-{MAX_THREADS - 1}"', css)
+
+    def test_raw_records_falls_back_to_public_raw_leveldb(self):
+        sentinel = [SimpleNamespace(user_key=b"k", seq=1, value=b"v")]
+        self.assertIs(raw_records(SimpleNamespace(_fetched_records=sentinel), "ignored"), sentinel)
+
+        class FakeRawLevelDb:
+            def __init__(self, path):
+                self.path = path
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def iterate_records_raw(self):
+                return iter(sentinel)
+
+        fake_module = SimpleNamespace(RawLevelDb=FakeRawLevelDb)
+        fake_pkg = SimpleNamespace(ccl_leveldb=fake_module)
+        with patch.dict("sys.modules", {
+            "ccl_chromium_reader": fake_pkg,
+            "ccl_chromium_reader.ccl_leveldb": fake_module,
+        }):
+            self.assertEqual(raw_records(SimpleNamespace(), "store"), sentinel)

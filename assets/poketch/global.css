@@ -3,16 +3,20 @@
 @supports __SUPPORT__ {
   @property --sinnoh-provider-progress { syntax: "<number>"; inherits: true; initial-value: 0; }
   @property --sinnoh-provider { syntax: "<integer>"; inherits: true; initial-value: 0; }
+  @property --sinnoh-collapsed-progress { syntax: "<number>"; inherits: true; initial-value: 0; }
+  @property --sinnoh-collapsed { syntax: "<integer>"; inherits: true; initial-value: 0; }
   @property --sinnoh-window-progress { syntax: "<number>"; inherits: false; initial-value: 0; }
   @property --sinnoh-window { syntax: "<integer>"; inherits: false; initial-value: 0; }
   @keyframes sinnoh-provider { to { --sinnoh-provider-progress: 1; } }
+  @keyframes sinnoh-collapsed { to { --sinnoh-collapsed-progress: 1; } }
   @keyframes sinnoh-window { to { --sinnoh-window-progress: 1; } }
 
-  :root {
-    timeline-scope: --sinnoh-providers, --sinnoh-window-0, --sinnoh-window-1, --sinnoh-window-2;
-    animation: sinnoh-provider auto linear both;
-    animation-timeline: --sinnoh-providers;
+  :root__HEAD_READY__ {
+    timeline-scope: --sinnoh-providers, --sinnoh-collapsed, --sinnoh-window-0, --sinnoh-window-1, --sinnoh-window-2;
+    animation: sinnoh-provider auto linear both, sinnoh-collapsed auto linear both;
+    animation-timeline: --sinnoh-providers, --sinnoh-collapsed;
     --sinnoh-provider: round(nearest, calc(var(--sinnoh-provider-progress) * (__PROVIDERS__ - 1)), 1);
+    --sinnoh-collapsed: round(nearest, var(--sinnoh-collapsed-progress), 1);
     --sinnoh-track: __TRACK__;
     --sinnoh-windows: __WINDOWS__;
     --sinnoh-width: max(0px, min(
@@ -31,8 +35,8 @@
     --sinnoh-rocker-h: calc(44px * var(--sinnoh-scale));
   }
 
-  :root > head,
-  :root > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"]) {
+  :root__HEAD_READY__ > head,
+  :root__HEAD_READY__ > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"], link[rel="icon"]) {
     display: block;
     position: fixed;
     top: -200px;
@@ -54,7 +58,7 @@
     line-height: 0;
   }
 
-  :root > head {
+  :root__HEAD_READY__ > head {
     /* Keep the clickable controls in the same foreground layer as the face.
        The fixed head otherwise traps them behind chat and floating previews. */
     z-index: 49;
@@ -63,29 +67,35 @@
     container: sinnoh-providers / scroll-state;
   }
 
-  :root > head > title { --sinnoh-host: 0; scroll-timeline: --sinnoh-window-0 x; }
-  :root > head > meta[name="theme-color"] { --sinnoh-host: 1; scroll-timeline: --sinnoh-window-1 x; }
-  :root > head > link[rel="apple-touch-icon"] { --sinnoh-host: 2; scroll-timeline: --sinnoh-window-2 x; }
-  :root > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"]) {
+  :root__HEAD_READY__ > head > title { --sinnoh-host: 0; scroll-timeline: --sinnoh-window-0 x; }
+  :root__HEAD_READY__ > head > meta[name="theme-color"] { --sinnoh-host: 1; scroll-timeline: --sinnoh-window-1 x; }
+  :root__HEAD_READY__ > head > link[rel="apple-touch-icon"] { --sinnoh-host: 2; scroll-timeline: --sinnoh-window-2 x; }
+  :root__HEAD_READY__ > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"]) {
     --sinnoh-pages: if(style(--sinnoh-host: var(--sinnoh-track)): var(--sinnoh-windows); else: 1);
     scroll-marker-group: after;
   }
 
-  :root > head::before,
-  :root > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::before {
+  /* Optional collapse toggle hosted on the favicon link; degrades to always-expanded if absent. */
+  :root__HEAD_READY__ > head > link[rel="icon"] {
+    --sinnoh-pages: 2;
+    scroll-timeline: --sinnoh-collapsed x;
+  }
+
+  :root__HEAD_READY__ > head::before,
+  :root__HEAD_READY__ > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"], link[rel="icon"])::before {
     content: "";
     display: block;
     height: calc(16px * var(--sinnoh-pages));
   }
 
-  :root > head::before { --sinnoh-pages: __PROVIDERS__; }
-  :root > head::column,
-  :root > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::column {
+  :root__HEAD_READY__ > head::before { --sinnoh-pages: __PROVIDERS__; }
+  :root__HEAD_READY__ > head::column,
+  :root__HEAD_READY__ > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"], link[rel="icon"])::column {
     scroll-snap-align: start;
   }
 
   /* Markers at the ends let a disabled native scroll button wrap to the other end. */
-  :root > head > :is(meta[charset], meta[name="viewport"]) {
+  :root__HEAD_READY__ > head > :is(meta[charset], meta[name="viewport"]) {
     display: block;
     position: absolute;
     top: 0;
@@ -94,34 +104,35 @@
     scroll-snap-align: start;
   }
 
-  :root > head > meta[charset] { left: 0; }
-  :root > head > meta[name="viewport"] { left: calc(100px * (__PROVIDERS__ - 1)); }
+  :root__HEAD_READY__ > head > meta[charset] { left: 0; }
+  :root__HEAD_READY__ > head > meta[name="viewport"] { left: calc(100px * (__PROVIDERS__ - 1)); }
 
-  :root > head::scroll-marker-group {
+  :root__HEAD_READY__ > head::scroll-marker-group {
     position: fixed;
     inset: auto var(--sinnoh-rocker-x) var(--sinnoh-rocker-y) auto;
     width: var(--sinnoh-rocker-w);
     height: calc(89px * var(--sinnoh-scale));
     display: flex;
-    flex-direction: column-reverse;
+    flex-direction: column;
     justify-content: space-between;
     pointer-events: none;
     z-index: 50;
   }
 
-  :root > head > :is(meta[charset], meta[name="viewport"])::scroll-marker {
+  :root__HEAD_READY__ > head > :is(meta[charset], meta[name="viewport"])::scroll-marker {
     display: block;
     width: var(--sinnoh-rocker-w);
     height: var(--sinnoh-rocker-h);
     visibility: hidden;
   }
 
-  :root > head > meta[charset]::scroll-marker { content: __NEXT__; }
-  :root > head > meta[name="viewport"]::scroll-marker { content: __PREVIOUS__; }
+  /* Explicit flex order keeps upper=Previous and lower=Next regardless of <meta> DOM order. */
+  :root__HEAD_READY__ > head > meta[name="viewport"]::scroll-marker { order: 1; content: __PREVIOUS__; }
+  :root__HEAD_READY__ > head > meta[charset]::scroll-marker { order: 2; content: __NEXT__; }
 
   /* A one-page LCD (or inactive track) has no controls. The first marker sits
      inside the clipped group and gets the click only at the end of the track. */
-  :root > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::scroll-marker-group {
+  :root__HEAD_READY__ > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::scroll-marker-group {
     position: fixed;
     inset: auto var(--sinnoh-lcd-x) var(--sinnoh-lcd-y) auto;
     width: var(--sinnoh-lcd-w);
@@ -132,15 +143,15 @@
     z-index: 50;
   }
 
-  :root > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::column::scroll-marker {
+  :root__HEAD_READY__ > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::column::scroll-marker {
     content: if(style(--sinnoh-pages: 1): none; else: "" / "Next quota window");
     flex: 0 0 var(--sinnoh-lcd-w);
     visibility: hidden;
   }
 
-  :root > head::scroll-button(left),
-  :root > head::scroll-button(right),
-  :root > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::scroll-button(right) {
+  :root__HEAD_READY__ > head::scroll-button(left),
+  :root__HEAD_READY__ > head::scroll-button(right),
+  :root__HEAD_READY__ > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::scroll-button(right) {
     appearance: none;
     position: fixed;
     box-sizing: border-box;
@@ -154,25 +165,63 @@
     z-index: 51;
   }
 
-  :root > head::scroll-button(left),
-  :root > head::scroll-button(right) {
+  :root__HEAD_READY__ > head::scroll-button(left),
+  :root__HEAD_READY__ > head::scroll-button(right) {
     inset: auto var(--sinnoh-rocker-x) var(--sinnoh-rocker-y) auto;
     width: var(--sinnoh-rocker-w);
     height: var(--sinnoh-rocker-h);
   }
 
-  :root > head::scroll-button(left) {
+  :root__HEAD_READY__ > head::scroll-button(left) {
     content: "" / "Previous provider";
     bottom: calc(var(--sinnoh-rocker-y) + 45px * var(--sinnoh-scale));
   }
 
-  :root > head::scroll-button(right) { content: "" / "Next provider"; }
+  :root__HEAD_READY__ > head::scroll-button(right) { content: "" / "Next provider"; }
 
-  :root > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::scroll-button(right) {
+  :root__HEAD_READY__ > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::scroll-button(right) {
     content: "" / "Next quota window";
     inset: auto var(--sinnoh-lcd-x) var(--sinnoh-lcd-y) auto;
     width: var(--sinnoh-lcd-w);
     height: var(--sinnoh-lcd-h);
+  }
+
+  :root__HEAD_READY__ > head > link[rel="icon"]::scroll-button(right),
+  :root__HEAD_READY__ > head > link[rel="icon"]::scroll-button(left) {
+    appearance: none;
+    position: fixed;
+    box-sizing: border-box;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    pointer-events: none;
+    visibility: hidden;
+    z-index: 52;
+  }
+
+  :root__HEAD_READY__ > head > link[rel="icon"]::scroll-button(right) {
+    content: "−" / "Hide Pokétch";
+    inset: auto calc(14px + 28px * var(--sinnoh-scale)) calc(90px + 116px * var(--sinnoh-scale)) auto;
+    width: max(20px, calc(22px * var(--sinnoh-scale)));
+    height: max(14px, calc(14px * var(--sinnoh-scale)));
+    display: grid;
+    place-items: center;
+    border: 1px solid #596075;
+    border-radius: 4px;
+    background: #252834;
+    color: #c7d9c0;
+    font: 700 11px/1 ui-monospace, monospace;
+    opacity: 0.8;
+    filter: drop-shadow(0 1px 3px #0c0f1f);
+  }
+
+  :root__HEAD_READY__ > head > link[rel="icon"]::scroll-button(left) {
+    content: "" / "Show Pokétch";
+    inset: auto 14px 90px auto;
+    width: 44px;
+    height: 24px;
+    background: __MINI__ center / contain no-repeat;
+    filter: drop-shadow(0 2px 5px #0c0f1f);
   }
 
   /* Settings and Usage may leave the previous chat mounted in an inert sidebar inset. */
@@ -183,6 +232,7 @@
       position: fixed;
       box-sizing: border-box;
       pointer-events: none;
+      visibility: if(style(--sinnoh-collapsed: 1): hidden; else: visible);
       z-index: 49;
     }
 
@@ -213,20 +263,39 @@
     & > head::scroll-button(left):enabled,
     & > head::scroll-button(right):enabled,
     & > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::scroll-button(right):enabled {
+      visibility: if(style(--sinnoh-collapsed: 1): hidden; else: visible);
+      pointer-events: if(style(--sinnoh-collapsed: 1): none; else: auto);
+      cursor: pointer;
+    }
+
+    & > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::column::scroll-marker {
+      visibility: if(style(--sinnoh-collapsed: 1): hidden; else: visible);
+      pointer-events: if(style(--sinnoh-collapsed: 1): none; else: auto);
+      cursor: pointer;
+    }
+
+    & > head > link[rel="icon"]::scroll-button(right):enabled,
+    & > head > link[rel="icon"]::scroll-button(left):enabled {
       visibility: visible;
       pointer-events: auto;
       cursor: pointer;
     }
 
-    & > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::column::scroll-marker {
-      visibility: visible;
-      pointer-events: auto;
-      cursor: pointer;
+    & > head > link[rel="icon"]::scroll-button(right):hover {
+      opacity: 1;
+      background: #383b46;
+      color: #ffffff;
+    }
+
+    & > head > link[rel="icon"]::scroll-button(left):hover {
+      transform: scale(1.06);
     }
 
     & > head::scroll-button(left):focus-visible,
     & > head::scroll-button(right):focus-visible,
     & > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::scroll-button(right):focus-visible,
+    & > head > link[rel="icon"]::scroll-button(right):focus-visible,
+    & > head > link[rel="icon"]::scroll-button(left):focus-visible,
     & > head > :is(meta[charset], meta[name="viewport"])::scroll-marker:focus-visible,
     & > head > :is(title, meta[name="theme-color"], link[rel="apple-touch-icon"])::column::scroll-marker:focus-visible {
       outline: 2px solid white;
@@ -241,16 +310,16 @@
 
     @container sinnoh-providers not scroll-state(scrollable: right) {
       & > head > meta[charset]::scroll-marker {
-        visibility: visible;
-        pointer-events: auto;
+        visibility: if(style(--sinnoh-collapsed: 1): hidden; else: visible);
+        pointer-events: if(style(--sinnoh-collapsed: 1): none; else: auto);
         cursor: pointer;
       }
     }
 
     @container sinnoh-providers not scroll-state(scrollable: left) {
       & > head > meta[name="viewport"]::scroll-marker {
-        visibility: visible;
-        pointer-events: auto;
+        visibility: if(style(--sinnoh-collapsed: 1): hidden; else: visible);
+        pointer-events: if(style(--sinnoh-collapsed: 1): none; else: auto);
         cursor: pointer;
       }
     }

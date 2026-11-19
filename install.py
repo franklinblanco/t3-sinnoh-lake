@@ -29,9 +29,28 @@ def write_atomic(target, data):
 
 
 def copy_tree(source, dest):
+    expected = set()
     for path in source.rglob("*"):
         if path.is_file() and path.suffix != ".pyc" and not path.name.startswith("."):
-            write_atomic(dest / path.relative_to(source), path.read_bytes())
+            relative = path.relative_to(source)
+            expected.add(relative)
+            write_atomic(dest / relative, path.read_bytes())
+    if not dest.is_dir():
+        return
+    for existing in sorted(dest.rglob("*"), reverse=True):
+        relative = existing.relative_to(dest)
+        if "__pycache__" in relative.parts and not existing.name.startswith("._"):
+            continue
+        if existing.is_file() and relative not in expected:
+            try:
+                existing.unlink()
+            except OSError:
+                pass
+        elif existing.is_dir() and existing.name != "__pycache__":
+            try:
+                existing.rmdir()
+            except OSError:
+                pass
 
 
 def install_theme(directory, root, python):

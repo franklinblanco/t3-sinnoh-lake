@@ -39,7 +39,31 @@ class PanelTest(unittest.TestCase):
             self.assertIn(second, css)
             self.assertNotIn(first, css)
             self.assertIn("--sinnoh-providers", css)
+            self.assertNotIn("\\", css)
             self.assertEqual(css.count(context_meter.PANEL_START), 1)
+
+    def test_copy_tree_prunes_stale_files_and_appledouble_artifacts(self):
+        import install
+
+        with TemporaryDirectory() as temp:
+            source = Path(temp) / "src"
+            dest = Path(temp) / "dst"
+            (source / "sub").mkdir(parents=True)
+            (source / "keep.py").write_text("print('ok')\n", encoding="utf-8")
+            (source / "sub" / "asset.json").write_text("{}", encoding="utf-8")
+            (dest / "old_dir").mkdir(parents=True)
+            (dest / "__pycache__").mkdir(parents=True)
+            (dest / "follow.py").write_text("legacy", encoding="utf-8")
+            (dest / "._keep.py").write_bytes(b"appledouble")
+            (dest / "old_dir" / "stale.txt").write_text("old", encoding="utf-8")
+            (dest / "__pycache__" / "keep.cpython-313.pyc").write_bytes(b"pyc")
+            install.copy_tree(source, dest)
+            self.assertTrue((dest / "keep.py").is_file())
+            self.assertTrue((dest / "sub" / "asset.json").is_file())
+            self.assertFalse((dest / "follow.py").exists())
+            self.assertFalse((dest / "._keep.py").exists())
+            self.assertFalse((dest / "old_dir").exists())
+            self.assertTrue((dest / "__pycache__" / "keep.cpython-313.pyc").is_file())
 
     def test_only_same_origin_requests_get_quota_fields(self):
         with TemporaryDirectory() as temp:
@@ -62,6 +86,10 @@ class PanelTest(unittest.TestCase):
                     page = connection.getresponse()
                     self.assertIn("frame-ancestors 'none'", page.getheader("Content-Security-Policy"))
                     self.assertIn(b"Previous provider", page.read())
+                    connection.request("GET", PANEL_PATH + "spec.json")
+                    spec_response = connection.getresponse()
+                    self.assertEqual(spec_response.status, 200)
+                    self.assertEqual(json.loads(spec_response.read()), poketch_theme.SPEC)
                     connection.request("GET", USAGE_PATH)
                     self.assertEqual(connection.getresponse().status, 403)
                     connection.close()

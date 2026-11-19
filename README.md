@@ -31,6 +31,7 @@ The worker reads the provider instance configuration and cached quota fields on 
 ## Quota, context and local time
 
 - Press the upper or lower red rocker to cycle through every configured provider instance and any enabled built-ins present in T3’s cache.
+- Click the **−** tab on the top-right edge of the Pokétch to collapse it to a compact badge (letting clicks pass through the chat area underneath), and click the badge to restore it with your selected provider and window intact.
 - **LEFT** and the meter show remaining quota. The LCD starts on the tightest valid quota window for the selected provider. Click the LCD to cycle all reported windows. The theme uses the worker’s local time zone for reset times.
 - Expired quota values are hidden until T3 reports a new snapshot. Selecting an expired window shows **Awaiting reset update**. Unknown quota shows a dash. A valid exhausted window shows **0%** and an empty meter.
 - Hover over the ring to the left of the composer’s model picker for the thread’s context percentage. Linked machines use the latest reading T3 Desktop received, including last-known data when a machine goes offline. The theme prioritizes recent and active threads within T3’s stylesheet size limit.

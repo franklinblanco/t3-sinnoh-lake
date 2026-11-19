@@ -5,9 +5,13 @@ const ui = Object.fromEntries(
     "window", "pager", "reset", "announcement"].map((id) => [id, document.getElementById(id)]),
 );
 const providerKey = "sinnoh-poketch-provider";
-const segments = [[2, 0, 12, 3], [13, 2, 3, 10], [13, 14, 3, 10], [2, 23, 12, 3],
-  [0, 14, 3, 10], [0, 2, 3, 10], [2, 12, 12, 3]];
-const digitMasks = [0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f];
+let spec = {
+  meterBars: 12,
+  staleMinutes: 30,
+  segments: [[2, 0, 12, 3], [13, 2, 3, 10], [13, 14, 3, 10], [2, 23, 12, 3],
+    [0, 14, 3, 10], [0, 2, 3, 10], [2, 12, 12, 3]],
+  digitMasks: [0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f],
+};
 
 let providers = [];
 let providerId = localStorage.getItem(providerKey) ?? "codex";
@@ -17,8 +21,8 @@ let connected = true;
 function digitElement(value) {
   const digit = document.createElement("span");
   digit.className = "digit";
-  segments.forEach(([x, y, width, height], index) => {
-    if (digitMasks[Number(value)] & (1 << index)) {
+  spec.segments.forEach(([x, y, width, height], index) => {
+    if (spec.digitMasks[Number(value)] & (1 << index)) {
       const segment = document.createElement("i");
       Object.assign(segment.style, { left: `${x}px`, top: `${y}px`,
         width: `${width}px`, height: `${height}px` });
@@ -37,8 +41,8 @@ function drawRemaining(value) {
     return;
   }
   ui.percent.replaceChildren(...String(Math.round(value)).split("").map(digitElement), "%");
-  const filled = Math.ceil(value * 12 / 100);
-  ui.meter.replaceChildren(...Array.from({ length: 12 }, (_, index) => {
+  const filled = Math.ceil(value * spec.meterBars / 100);
+  ui.meter.replaceChildren(...Array.from({ length: spec.meterBars }, (_, index) => {
     const segment = document.createElement("i");
     segment.classList.toggle("filled", index < filled);
     return segment;
@@ -61,7 +65,7 @@ function render(announce = false) {
   const now = Date.now();
   const { index, provider, order, window } = selection(providers, providerId, windowId, now);
   const value = connected ? remaining(window, now) : null;
-  const old = value !== null && now - Date.parse(provider.checked) > 30 * 60 * 1000;
+  const old = value !== null && now - Date.parse(provider.checked) > spec.staleMinutes * 60 * 1000;
   const total = provider?.windows.length ?? 0;
   const name = provider?.name ?? "Providers";
   const label = window?.label ?? "No quota window";
@@ -103,6 +107,15 @@ ui.lcd.addEventListener("click", () => {
   render(true);
 });
 
+async function loadSpec() {
+  try {
+    const response = await fetch("spec.json", { signal: AbortSignal.timeout(5000) });
+    if (response.ok) spec = await response.json();
+  } catch {
+    // Keep inline defaults if spec.json is unavailable.
+  }
+}
+
 async function refresh() {
   try {
     const response = await fetch("usage.json", {
@@ -123,4 +136,4 @@ async function refresh() {
   setTimeout(refresh, 10_000);
 }
 
-refresh();
+loadSpec().finally(refresh);

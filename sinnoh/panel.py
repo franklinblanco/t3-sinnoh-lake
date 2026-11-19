@@ -19,6 +19,7 @@ FILES = {
     PANEL_PATH + "panel.css": ("panel.css", "text/css"),
     PANEL_PATH + "panel.mjs": ("panel.mjs", "text/javascript"),
     PANEL_PATH + "model.mjs": ("model.mjs", "text/javascript"),
+    PANEL_PATH + "spec.json": ("spec.json", "application/json"),
 }
 USAGE_PATH = PANEL_PATH + "usage.json"
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "

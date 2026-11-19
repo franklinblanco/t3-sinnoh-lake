@@ -13,6 +13,8 @@ END = "/* End Sinnoh context meter */"
 PANEL_START = "/* Sinnoh floating Pokétch */"
 PANEL_END = "/* End Sinnoh floating Pokétch */"
 LIMIT = 100_000  # T3's maximum theme CSS size.
+METER_BUDGET = 24_000  # Keep headroom below LIMIT and avoid evaluating 100+ :root:has() rules.
+MAX_THREADS = 40
 BASE = """
 [data-chat-composer-form] [data-chat-provider-model-picker] {
   position: relative;
@@ -81,17 +83,20 @@ def readings(root):
         connection.close()
 
 
-def meter_css(rows, budget):
+def meter_css(rows, budget, *, max_threads=MAX_THREADS):
     # Prioritize recently active threads in every environment within T3's CSS limit.
     by_environment = defaultdict(list)
     for row in rows:
         by_environment[row[0]].append(row)
     groups = defaultdict(list)
     total = len((START + BASE + END + "\n" * 3).encode())
+    selected = 0
     for batch in zip_longest(*by_environment.values()):
         for row in batch:
             if row is None:
                 continue
+            if max_threads is not None and selected >= max_threads:
+                break
             env, thread, percent = row
             sidebar = f'[data-sidebar-row={css_string(env + ":" + thread)}]'
             citation = f'[data-assistant-citation-thread={css_string(thread)}]'
@@ -105,6 +110,9 @@ def meter_css(rows, budget):
             if total + cost <= budget:
                 groups[group].append((sidebar, citation))
                 total += cost
+                selected += 1
+        if max_threads is not None and selected >= max_threads:
+            break
     blocks = [START, BASE]
     for (prefix, middle, suffix), selectors in sorted(groups.items()):
         sidebar, citations = (','.join(column) for column in zip(*sorted(selectors)))
@@ -129,6 +137,7 @@ def sync(root=None, *, poketch_css=None):
             return
         base = (prefix + (suffix.partition(PANEL_END)[2] if panel_marker else "")).rstrip()
         base = "\n".join(part for part in (base, PANEL_START, poketch_css.rstrip(), PANEL_END) if part)
+    budget = min(METER_BUDGET, LIMIT - len(base.encode()) - 1)
     try:
         env, rows = readings(root)
     except (OSError, sqlite3.Error):
@@ -136,11 +145,11 @@ def sync(root=None, *, poketch_css=None):
             return
         # Preserve cached readings when they still fit after replacing the panel.
         context = marker + tail.partition(END)[0] + END if marker else ""
-        if len((base + "\n" + context).encode()) > LIMIT:
-            context = meter_css([], LIMIT - len(base.encode()) - 1)
+        if len((base + "\n" + context).encode()) > LIMIT or len(context.encode()) > budget:
+            context = meter_css([], budget)
     else:
         rows.extend(linked_readings(root, env))
-        context = meter_css(rows, LIMIT - len(base.encode()) - 1)
+        context = meter_css(rows, budget)
     result = "\n".join(filter(None, (base, context)))
     if result != css and len(result.encode()) <= LIMIT:
         theme["css"] = result

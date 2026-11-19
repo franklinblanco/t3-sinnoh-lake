@@ -1,5 +1,6 @@
 """Render quota snapshots as a sprite addressed by T3's native CSS scroll controls."""
 from datetime import datetime, timedelta, timezone
+import json
 import math
 import re
 from urllib.parse import quote
@@ -11,11 +12,24 @@ from .usage import read_providers
 SUPPORT = ("(selector(head::column::scroll-marker)) and (selector(head::scroll-button(right))) "
            "and (animation-timeline: --sinnoh-providers) "
            'and (content: if(style(--x: 0): ""; else: none))')
-CHAT = ':root:has([data-chat-canvas]:not([data-slot="sidebar-inset"][inert] *))'
+HEAD_HOSTS = (
+    'meta[charset]',
+    'meta[name="viewport"]',
+    'title',
+    'meta[name="theme-color"]',
+    'link[rel="apple-touch-icon"]',
+)
+HEAD_READY = "".join(f":has(> head > {tag})" for tag in HEAD_HOSTS)
+HEAD_MISSING = ":is(" + ", ".join(f":not(:has(> head > {tag}))" for tag in HEAD_HOSTS) + ")"
+CHAT = f':root{HEAD_READY}:has([data-chat-canvas]:not([data-slot="sidebar-inset"][inert] *))'
 ASSET_DIR = ASSETS / "poketch"
-SEGMENTS = ((2, 0, 12, 3), (13, 2, 3, 10), (13, 14, 3, 10), (2, 23, 12, 3),
-            (0, 14, 3, 10), (0, 2, 3, 10), (2, 12, 12, 3))
-DIGITS = (0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f)
+SPEC = json.loads((ASSET_DIR / "spec.json").read_text(encoding="utf-8"))
+LCD_WIDTH = SPEC["lcd"]["width"]
+LCD_HEIGHT = SPEC["lcd"]["height"]
+METER_BARS = SPEC["meterBars"]
+STALE_MINUTES = SPEC["staleMinutes"]
+SEGMENTS = tuple(tuple(segment) for segment in SPEC["segments"])
+DIGITS = tuple(SPEC["digitMasks"])
 CONTROL = re.compile(r"[\x00-\x1f\ud800-\udfff\ufffe\uffff]")
 
 
@@ -67,7 +81,7 @@ def face(provider, window, index, count, page, pages, now):
         parts.append(text(f"{index + 1}/{count}", 182, 15, 10, 9, end=True))
     if pages > 1:
         parts.append(text(f"{page + 1}/{pages} ›", 181, 72, 9, 9, end=True))
-    old = used is not None and provider.checked and now - provider.checked > timedelta(minutes=30)
+    old = used is not None and provider.checked and now - provider.checked > timedelta(minutes=STALE_MINUTES)
     if used is None:
         parts.append("<path d='M11 43h25v3H11z'/>")
         quota = "Quota remaining unknown"
@@ -78,9 +92,9 @@ def face(provider, window, index, count, page, pages, now):
         for offset, digit in enumerate(digits):
             parts.append(f"<use href='#d{digit}' x='{9 + 19 * offset}' y='32'/>")
         parts.append(text("%", 9 + len(digits) * 19, 51, 14, 1))
-        filled = math.ceil(left * 12 / 100)
+        filled = math.ceil(left * METER_BARS / 100)
         parts.append("<path fill='#749d6b' d='" +
-                     "".join(f"M{109 + 6 * offset} 46h4v9h-4z" for offset in range(12)) + "'/>")
+                     "".join(f"M{109 + 6 * offset} 46h4v9h-4z" for offset in range(METER_BARS)) + "'/>")
         if filled:
             parts.append("<path d='" +
                          "".join(f"M{109 + 6 * offset} 46h4v9h-4z" for offset in range(filled)) + "'/>")
@@ -92,19 +106,19 @@ def face(provider, window, index, count, page, pages, now):
     description = CONTROL.sub(" ", description).replace('"', "”").replace("\\", "∖")
     description = " ".join(description.split())
     return (
-        f"<g transform='translate({index * 186} {page * 96})' clip-path='url(#lcd)'>"
+        f"<g transform='translate({index * LCD_WIDTH} {page * LCD_HEIGHT})' clip-path='url(#lcd)'>"
         + "".join(parts) + "</g>",
         f'"{description}"',
     )
 
 
 def sprite(faces, provider_count, max_windows):
-    definitions = ["<clipPath id='lcd'><path d='M0 0h186v96H0z'/></clipPath>"]
+    definitions = [f"<clipPath id='lcd'><path d='M0 0h{LCD_WIDTH}v{LCD_HEIGHT}H0z'/></clipPath>"]
     for digit, mask in enumerate(DIGITS):
         path = "".join(f"M{x} {y}h{width}v{height}h-{width}z"
                        for index, (x, y, width, height) in enumerate(SEGMENTS) if mask & (1 << index))
         definitions.append(f"<path id='d{digit}' d='{path}'/>")
-    width, height = 186 * provider_count, 96 * max_windows
+    width, height = LCD_WIDTH * provider_count, LCD_HEIGHT * max_windows
     return image(f"<svg xmlns='http://www.w3.org/2000/svg' width='{width}' height='{height}'>"
                  "<defs>" + "".join(definitions) + "</defs>"
                  "<g fill='#26422b' font-family='ui-monospace,monospace' font-weight='700'>"
@@ -142,9 +156,11 @@ def styles(root, port, now=None):
     legacy = ', '.join(f'[src="{u}"]' for u in sorted(urls))
     viewport = '[data-preview-viewport][style*="z-index: 48;"]'
     substitutions = {
-        "SUPPORT": SUPPORT, "CHAT": CHAT, "PROVIDERS": str(count), "TRACK": cases("provider", tracks),
+        "SUPPORT": SUPPORT, "HEAD_READY": HEAD_READY, "CHAT": CHAT,
+        "PROVIDERS": str(count), "TRACK": cases("provider", tracks),
         "WINDOWS": cases("provider", list(map(len, windows))),
         "HOUSING": image((ASSET_DIR / "housing.svg").read_text(encoding="utf-8")),
+        "MINI": image((ASSET_DIR / "mini.svg").read_text(encoding="utf-8")),
         "FACES": sprite(faces, count, max_windows), "MAX_WINDOWS": str(max_windows),
         "DESCRIPTIONS": cases("provider", descriptions),
         "NEXT": '"" / "Next provider"' if count > 1 else "none",
@@ -155,7 +171,12 @@ def styles(root, port, now=None):
     global_css = (ASSET_DIR / "global.css").read_text(encoding="utf-8")
     global_css = re.sub(r"__([A-Z_]+)__", lambda match: substitutions[match[1]], global_css)
     fallback = fallback_styles(url)
-    return global_css + f"\n@supports not ({SUPPORT}) {{\n{fallback}\n}}"
+    missing_head = fallback.replace(":root:has(", f":root{HEAD_MISSING}:has(", 1)
+    return (
+        global_css
+        + f"\n@supports ({SUPPORT}) {{\n{missing_head}\n}}"
+        + f"\n@supports not ({SUPPORT}) {{\n{fallback}\n}}"
+    )
 
 
 def fallback_styles(url):
