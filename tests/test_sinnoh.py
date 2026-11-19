@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from zoneinfo import ZoneInfo
 
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageStat
 
 from sinnoh.paths import ASSETS
 from sinnoh.solar import PHASES, observer_for, phase_at, publish
@@ -70,6 +70,21 @@ class UsageTest(unittest.TestCase):
 
 
 class SolarTest(unittest.TestCase):
+    def test_autumn_palette_survives_the_daylight_grade(self):
+        for path in (ASSETS / "sinnoh-rift.png", ASSETS / "phases" / "day.webp"):
+            with self.subTest(asset=path.name), Image.open(path) as image:
+                self.assertEqual(image.size, (1672, 941))
+                scene = image.convert("RGB")
+                # Sample whole clusters so one leaf or ripple cannot decide the result.
+                maple = ImageStat.Stat(scene.crop((95, 210, 170, 265))).mean
+                bank = ImageStat.Stat(scene.crop((12, 795, 85, 848))).mean
+                water = ImageStat.Stat(scene.crop((790, 665, 890, 708))).mean
+                self.assertGreater(maple[0], max(maple[1:]) + 25, "russet canopy")
+                self.assertGreater(bank[0], bank[1], "golden shoreline")
+                self.assertGreater(bank[1], bank[2] + 15, "golden shoreline")
+                self.assertGreater(water[2], water[1], "blue lake")
+                self.assertGreater(water[1], water[0] + 20, "blue lake")
+
     def test_representative_cities_and_solar_directions(self):
         madrid = observer_for(ZoneInfo("Europe/Madrid"), NOW)
         eastern = observer_for(ZoneInfo("US/Eastern"), NOW)

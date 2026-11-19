@@ -79,7 +79,7 @@ class LakeTraffic:
                                (393, 30, True, 31, 32, .4), (387, 39, False, 59, 31, .1),
                                (390, 31, False, 87, 31, .73)]]
         # Trace the near bank in the original pixel artwork. The boat disappears
-        # behind these snowbanks and spruce branches at the west end of its run.
+        # behind these rocky ledges and spruce branches at the west end of its run.
         mask = Image.new('L', lake.size)
         boundary = [(0, 508), (155, 508), (145, 523), (184, 535), (171, 538),
                     (189, 541), (170, 552), (160, 553), (178, 571), (193, 577),

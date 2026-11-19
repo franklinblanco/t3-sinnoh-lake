@@ -1,6 +1,6 @@
 from pathlib import Path
 from PIL import Image, ImageChops, ImageDraw, ImageOps
-from cruise import LakeTraffic
+from cruise import LakeTraffic, lit
 import numpy as np
 import math, struct, sys
 from io import BytesIO
@@ -26,48 +26,94 @@ def mix(a,b,f):
     return a*(1-f) + b*f
 
 def scene():
-    src = np.asarray(original,dtype=np.float32)
-    lum = src @ np.array([.24,.56,.20],dtype=np.float32)
-    x = (np.arange(W,dtype=np.float32)[None,:]+.5)/W
-    y = (np.arange(H,dtype=np.float32)[:,None]+.5)/H
-    stops = [0,19,37,55,80,110,159,214,255]
-    def ramp(palette, chroma):
-        palette=np.array(palette)
-        colors=np.stack([np.interp(lum,stops,channel) for channel in palette.T],axis=-1)
-        return colors+(src-lum[...,None])*chroma
-    night=src*np.array([.74,.79,.96])
-    if mode=='night': return Image.fromarray(np.uint8(np.clip(night,0,255)))
-    blue=ramp([(5,23,40),(14,45,64),(34,81,103),(63,116,142),(96,147,168),(133,176,188),(178,206,211),(224,235,229),(250,252,241)],.30)
-    # The low sky and the lake itself catch more skylight than the shaded foreground.
-    daylight=blue+np.array([7,17,23])*np.exp(-((y-.36)/.38)**2)[:,:,None]
-    if mode=='day': return Image.fromarray(np.uint8(np.clip(daylight,0,255)))
-    morning = mode=='rise'
+    src = np.asarray(original, dtype=np.float32)
+    lum = src @ np.array([.24, .60, .16], dtype=np.float32)
+    chroma = src - lum[..., None]
+    x = (np.arange(W) + .5) / W
+    y = (np.arange(H)[:, None] + .5) / H
+
+    def grade(tones, saturation):
+        # Map values separately from hue so brass leaves and teal water keep
+        # their local colors even when they share the same brightness.
+        values = [0, 32, 64, 96, 128, 160, 192, 224, 255]
+        base = np.stack([np.interp(lum, values, channel)
+                         for channel in zip(*tones)], axis=-1)
+        return base + saturation * chroma
+
+    def rgb(values):
+        return Image.fromarray(np.uint8(np.clip(values, 0, 255)))
+
+    daylight = src * [.84, .86, .88] + [3, 5, 7]
+    if mode == 'day':
+        return rgb(daylight)
+
+    night = grade([(3, 8, 19), (8, 17, 31), (16, 27, 46),
+                   (26, 38, 63), (37, 49, 78), (49, 60, 89),
+                   (63, 73, 100), (81, 89, 113), (103, 109, 129)], .16)
+    if mode == 'night':
+        return rgb(night)
+
+    morning = mode == 'rise'
     center = .448 if morning else .656
-    golden = ramp(([(12,24,48),(27,41,64),(62,71,90),(100,101,114),(150,129,132),(189,154,149),(232,192,165),(255,228,191),(255,245,219)]
-         if morning else [(17,18,42),(39,32,60),(78,55,82),(118,75,96),(163,97,103),(202,123,111),(240,164,127),(255,212,164),(255,237,201)]),.32)
-    glow=np.exp(-((x-center)/.27)**2-((y-.36)/.135)**2)
-    golden+=glow[:,:,None]*(np.array([98,61,19]) if morning else np.array([110,58,11]))
-    # The lake catches a broken column of light in its existing horizontal pixel texture.
-    surface=np.clip((y-.548)/.078,0,1)*np.exp(-((y-.65)/.21)**2)
-    strokes=.35+.65*np.clip((lum-26)/35,0,1)
-    reflected=np.exp(-((x-center)/(.029+.10*np.maximum(0,y-.54)))**2)*surface*strokes
-    golden+=reflected[:,:,None]*np.array([86,47,13])
-    f=[0,.16,.36,.62,.85,1,.73,.43,.20][step]
-    base=night if step<=5 else daylight
-    result=mix(base,golden,f)
-    # A pixel sun peeks over the ridge. Sampled skyline segments follow the art at each disc.
-    if step>=4:
-        cx=round((center+(.007 if morning else -.007)*(step-5))*W)
-        rx=np.arange(W)
+    sun_x = center + (.007 if morning else -.007) * (max(step, 4) - 5)
+    ridge_height = .32 if morning else .40
+    dawn = [(8, 16, 29), (26, 33, 50), (47, 54, 77), (74, 77, 99),
+            (107, 99, 117), (149, 123, 131), (190, 151, 146),
+            (223, 184, 162), (242, 213, 183)]
+    dusk = [(12, 13, 30), (31, 29, 51), (55, 45, 69), (87, 61, 87),
+            (121, 80, 101), (158, 103, 111), (196, 132, 121),
+            (224, 166, 137), (245, 201, 156)]
+    golden = grade(dawn if morning else dusk, .37)
+    # Light pools low in the sky, catching cliff faces and the far trees.
+    glow = np.exp(-((x - sun_x) / .30)**2 - ((y - ridge_height) / .145)**2)
+    golden += glow[..., None] * ([80, 53, 22] if morning else [90, 49, 14])
+
+    # Use the painted horizontal ripples for the brighter glints. The
+    # reflection broadens towards the viewer and fades into the deep water.
+    depth = np.clip((y - .54) / .36, 0, 1)
+    surface = np.clip((y - .54) / .025, 0, 1) * (1 - depth)**1.5
+    width = .018 + .075 * depth
+    column = np.exp(-((x - sun_x) / width)**2) * surface
+    # Compare nearby rows to isolate the fine reflected marks from the large
+    # color fields of sky and forest already mirrored on the lake.
+    ripple = np.clip((lum - np.roll(lum, 3, axis=0)) / 12, 0, 1)
+    # A few sun-facing facets also catch light on the otherwise still open
+    # water. Keep the ripple pattern stable as the sun moves along the ridge.
+    facets = Image.new('L', (W, H))
+    draw = ImageDraw.Draw(facets)
+    rng = np.random.default_rng(214)
+    for distance in np.linspace(.012, .90, 74)**1.45:
+        row = round(H * (.54 + .36 * distance))
+        spread = W * (.005 + .046 * distance)
+        for offset in rng.normal(0, spread, 3):
+            left = round((sun_x * W + offset) / 2) * 2
+            length = round(rng.uniform(3, 9) * (1 + distance))
+            draw.line((left, row, left + length, row),
+                      fill=int(rng.integers(65, 190)), width=1 + int(distance > .22))
+    glints = np.maximum(ripple, np.asarray(facets) / 255)
+    golden += (column * (.19 + .81 * glints))[..., None] * [112, 79, 42]
+
+    weight = [0, .13, .31, .54, .79, 1, .74, .43, .18][step]
+    result = mix(night if step <= 5 else daylight, golden, weight)
+    if step >= 4:
+        # Trace the skyline around the two sun paths in source-pixel coordinates.
         if morning:
-            ridge=np.interp(rx/2,[345,355,361,370,382,390,400,410],[151,146,146,153,159,162,164,164])*2
+            ridge_x = [710, 717, 732, 744, 750, 760, 764, 772, 778, 786, 798, 812]
+            ridge_y = [295, 297, 297, 295, 298, 308, 310, 316, 317, 324, 326, 334]
         else:
-            ridge=np.interp(rx/2,[505,515,526,536,549,557,565,573],[181,180,185,189,186,184,181,185])*2
-        cy=ridge[cx]+[0,0,0,0,6,-6,-25,-54,-92][step]
-        px=(np.arange(W)//3*3)[None,:]; py=(np.arange(H)//3*3)[:,None]
-        sun=((px-cx)**2+(py-cy)**2<19**2)&(py<ridge[None,:]-3)
-        result[sun]=mix(result[sun],np.array([255,232,172]),.83 if step<=6 else .58)
-    return Image.fromarray(np.uint8(np.clip(result,0,255)))
+            ridge_x = [1036, 1048, 1054, 1063, 1070, 1078, 1084, 1096, 1104, 1110, 1124]
+            ridge_y = [364, 369, 370, 375, 376, 379, 379, 375, 373, 369, 366]
+        ridge = np.interp(np.arange(W), ridge_x, ridge_y)
+        cx = round(sun_x * W)
+        cy = ridge[cx] + {4: 8, 5: -5, 6: -25, 7: -54, 8: -92}[step]
+        px = (np.arange(W) // 3 * 3)[None, :]
+        py = (np.arange(H) // 3 * 3)[:, None]
+        disc = ((px - cx)**2 + (py - cy)**2 < 19**2)
+        # Clip each row against the ridge even within the sun's 3-pixel cells.
+        sun = disc & (np.arange(H)[:, None] < ridge[None, :])
+        result[sun] = mix(result[sun], np.array([255, 230, 174]), .90 if step <= 6 else .65)
+    return rgb(result)
+
 
 lake=scene()
 traffic = LakeTraffic(lake, mode, step)
@@ -88,7 +134,7 @@ def load_swimmer(species,width):
             frame=frame.crop(frame.getbbox())
         height=round(frame.height*width/frame.width*({129:.50,418:.84,456:.71}[species]))
         frame=frame.resize((width,height),Image.Resampling.NEAREST)
-        frames.append(frame)
+        frames.append(lit(frame, traffic.light))
         ends.append((ends[-1] if ends else 0)+gif.info.get("duration",100))
     return frames,ends
 groups=[load_swimmer(s[0],s[4]) for s in swimmers]
@@ -130,13 +176,17 @@ def render(n):
             wy=y+round(1+4*p)
             size=round(span*(.15-.10*p))+1
             shore=water.getpixel((wake_x,wy))[:3]
-            color=tuple(round(mix(c,198,(1-p)*(.32 if species!=456 else .18))) for c in shore)
+            opacity = (1 - p) * (.32 if species != 456 else .18)
+            color = tuple(round(mix(c, 198 * light, opacity))
+                          for c, light in zip(shore, traffic.light))
             draw.line((wake_x-size,wy,wake_x+size,wy),fill=color)
         # Foreground ripple crosses the sprite at its waterline.
         for start,end in [(-.34,-.15),(-.06,.21)]:
             wy=y+(1 if start<-.1 else 0)
             rgb=water.getpixel((x,wy))[:3]
-            col=tuple(round(mix(c,183,.31 if species!=456 else .21)) for c in rgb)
+            opacity = .31 if species != 456 else .21
+            col = tuple(round(mix(c, 183 * light, opacity))
+                        for c, light in zip(rgb, traffic.light))
             draw.line((round(x+start*span),wy,round(x+end*span),wy),fill=col,width=2)
     frame = lake.copy()
     frame.paste(sheet, waters[:2])
