@@ -1,4 +1,4 @@
-"""Render quota snapshots as a sprite addressed by T3's native CSS scroll controls."""
+"""Render quota snapshots as a 1D SVG sprite with auto-cycling CSS keyframes."""
 from datetime import datetime, timedelta, timezone
 import json
 import math
@@ -9,19 +9,8 @@ from xml.sax.saxutils import escape
 from .paths import ASSETS
 from .usage import read_providers
 
-SUPPORT = ("(selector(head::column::scroll-marker)) and (selector(head::scroll-button(right))) "
-           "and (animation-timeline: --sinnoh-providers) "
-           'and (content: if(style(--x: 0): ""; else: none))')
-HEAD_HOSTS = (
-    'meta[charset]',
-    'meta[name="viewport"]',
-    'title',
-    'meta[name="theme-color"]',
-    'link[rel="apple-touch-icon"]',
-)
-HEAD_READY = "".join(f":has(> head > {tag})" for tag in HEAD_HOSTS)
-HEAD_MISSING = ":is(" + ", ".join(f":not(:has(> head > {tag}))" for tag in HEAD_HOSTS) + ")"
-CHAT = f':root{HEAD_READY}:has([data-chat-canvas]:not([data-slot="sidebar-inset"][inert] *))'
+CHAT = ':root:has([data-chat-canvas]:not([data-slot="sidebar-inset"][inert] *))'
+SECONDS_PER_FACE = 5
 ASSET_DIR = ASSETS / "poketch"
 SPEC = json.loads((ASSET_DIR / "spec.json").read_text(encoding="utf-8"))
 LCD_WIDTH = SPEC["lcd"]["width"]
@@ -58,7 +47,7 @@ def ordered_windows(provider, now):
     return windows[first:] + windows[:first]
 
 
-def face(provider, window, index, count, page, pages, now):
+def face(provider, window, index, count, page, pages, face_index, now):
     name = provider.name if provider else "Providers"
     label = window.label if window else "No quota window"
     stale = window and window.reset and window.reset <= now
@@ -80,7 +69,7 @@ def face(provider, window, index, count, page, pages, now):
     if provider:
         parts.append(text(f"{index + 1}/{count}", 182, 15, 10, 9, end=True))
     if pages > 1:
-        parts.append(text(f"{page + 1}/{pages} ›", 181, 72, 9, 9, end=True))
+        parts.append(text(f"{page + 1}/{pages}", 181, 72, 9, 9, end=True))
     old = used is not None and provider.checked and now - provider.checked > timedelta(minutes=STALE_MINUTES)
     if used is None:
         parts.append("<path d='M11 43h25v3H11z'/>")
@@ -106,31 +95,36 @@ def face(provider, window, index, count, page, pages, now):
     description = CONTROL.sub(" ", description).replace('"', "”").replace("\\", "∖")
     description = " ".join(description.split())
     return (
-        f"<g transform='translate({index * LCD_WIDTH} {page * LCD_HEIGHT})' clip-path='url(#lcd)'>"
+        f"<g transform='translate({face_index * LCD_WIDTH} 0)' clip-path='url(#lcd)'>"
         + "".join(parts) + "</g>",
         f'"{description}"',
     )
 
 
-def sprite(faces, provider_count, max_windows):
+def sprite(faces):
     definitions = [f"<clipPath id='lcd'><path d='M0 0h{LCD_WIDTH}v{LCD_HEIGHT}H0z'/></clipPath>"]
     for digit, mask in enumerate(DIGITS):
         path = "".join(f"M{x} {y}h{width}v{height}h-{width}z"
                        for index, (x, y, width, height) in enumerate(SEGMENTS) if mask & (1 << index))
         definitions.append(f"<path id='d{digit}' d='{path}'/>")
-    width, height = LCD_WIDTH * provider_count, LCD_HEIGHT * max_windows
+    width, height = LCD_WIDTH * len(faces), LCD_HEIGHT
     return image(f"<svg xmlns='http://www.w3.org/2000/svg' width='{width}' height='{height}'>"
                  "<defs>" + "".join(definitions) + "</defs>"
                  "<g fill='#26422b' font-family='ui-monospace,monospace' font-weight='700'>"
                  + "".join(faces) + "</g></svg>")
 
 
-def cases(property_name, values):
-    """Keep constant ranges compact and use the last value as the default."""
-    if len(set(values)) == 1:
-        return str(values[0])
-    return "if(" + " ".join(f"style(--sinnoh-{property_name}: {i}): {value};"
-                             for i, value in enumerate(values[:-1])) + f" else: {values[-1]})"
+def cycle_keyframes(descriptions):
+    if len(descriptions) < 2:
+        return ""
+    total = len(descriptions)
+    lines = ["@keyframes sinnoh-cycle {"]
+    for index, label in enumerate(descriptions):
+        pct = "0%, 100%" if index == 0 else f"{index * 100 / total:.4f}%"
+        pos = "0 0" if index == 0 else f"calc(-{index} * var(--sinnoh-lcd-w)) 0"
+        lines.append(f'  {pct} {{ background-position: {pos}; content: "" / {label}; }}')
+    lines.append("}")
+    return "\n".join(lines) + "\n\n"
 
 
 def styles(root, port, now=None):
@@ -138,46 +132,29 @@ def styles(root, port, now=None):
     providers = read_providers(root) or [None]
     windows = [ordered_windows(provider, now) if provider else (None,) for provider in providers]
     count = len(providers)
-    max_windows = max(map(len, windows))
     faces = []
     descriptions = []
     for index, (provider, pages) in enumerate(zip(providers, windows)):
-        fragments, labels = zip(*(face(provider, window, index, count, page, len(pages), now)
-                                  for page, window in enumerate(pages)))
-        faces.extend(fragments)
-        descriptions.append(cases("window", labels))
-    # Adjacent providers use different tracks, including both ends of an odd-length
-    # carousel. An inactive track has one page, which resets its scroll position.
-    tracks = [index % 2 for index in range(count)]
-    if count > 1 and count % 2:
-        tracks[-1] = 2
+        for page, window in enumerate(pages):
+            fragment, label = face(provider, window, index, count, page, len(pages), len(faces), now)
+            faces.append(fragment)
+            descriptions.append(label)
+    face_count = len(faces)
     url = f"http://127.0.0.1:{port}/poketch/"
     urls = {url, "http://127.0.0.1:47984/poketch/"}
     legacy = ', '.join(f'[src="{u}"]' for u in sorted(urls))
     viewport = '[data-preview-viewport][style*="z-index: 48;"]'
+    animation = f"sinnoh-cycle {face_count * SECONDS_PER_FACE}s steps(1, end) infinite" if face_count > 1 else "none"
     substitutions = {
-        "SUPPORT": SUPPORT, "HEAD_READY": HEAD_READY, "CHAT": CHAT,
-        "PROVIDERS": str(count), "TRACK": cases("provider", tracks),
-        "WINDOWS": cases("provider", list(map(len, windows))),
+        "KEYFRAMES": cycle_keyframes(descriptions),
+        "CHAT": CHAT,
+        "FACE_COUNT": str(face_count),
         "HOUSING": image((ASSET_DIR / "housing.svg").read_text(encoding="utf-8")),
-        "MINI": image((ASSET_DIR / "mini.svg").read_text(encoding="utf-8")),
-        "FACES": sprite(faces, count, max_windows), "MAX_WINDOWS": str(max_windows),
-        "DESCRIPTIONS": cases("provider", descriptions),
-        "NEXT": '"" / "Next provider"' if count > 1 else "none",
-        "PREVIOUS": '"" / "Previous provider"' if count > 1 else "none",
+        "INITIAL_DESCRIPTION": descriptions[0],
+        "FACES": sprite(faces),
+        "ANIMATION": animation,
         "FLOAT": viewport,
         "LEGACY_GUEST": f'webview:is({legacy}):not([aria-hidden="true"])',
     }
     global_css = (ASSET_DIR / "global.css").read_text(encoding="utf-8")
-    global_css = re.sub(r"__([A-Z_]+)__", lambda match: substitutions[match[1]], global_css)
-    fallback = fallback_styles(url)
-    missing_head = fallback.replace(":root:has(", f":root{HEAD_MISSING}:has(", 1)
-    return (
-        global_css
-        + f"\n@supports ({SUPPORT}) {{\n{missing_head}\n}}"
-        + f"\n@supports not ({SUPPORT}) {{\n{fallback}\n}}"
-    )
-
-
-def fallback_styles(url):
-    return (ASSET_DIR / "floating.css").read_text(encoding="utf-8").replace("__POKETCH_URL__", url)
+    return re.sub(r"__([A-Z_]+)__", lambda match: substitutions[match[1]], global_css)

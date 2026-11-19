@@ -97,7 +97,7 @@ try {
 }
 
 async function verifyGlobal(page) {
-  const css = execFileSync(process.env.SINNOH_PYTHON || "python3", ["-c", `
+  const generateCss = (providersJson) => execFileSync(process.env.SINNOH_PYTHON || "python3", ["-c", `
 import json
 import sys
 from pathlib import Path
@@ -116,14 +116,32 @@ with patch("sinnoh.poketch_theme.read_providers", return_value=providers):
     print(styles(Path("."), 47984))
 `], {
     cwd: new URL("../", import.meta.url),
-    input: JSON.stringify([...quotas, {
-      ...quotas[0],
-      id: "third",
-      name: "Third",
-      windows: [...quotas[0].windows, { id: "expired", label: "Expired", used: 15, reset: "2000-01-01T00:00:00Z" }],
-    }]),
+    input: JSON.stringify(providersJson),
     encoding: "utf8",
   });
+
+  const multiProviders = [...quotas, {
+    ...quotas[0],
+    id: "third",
+    name: "Third",
+    windows: [...quotas[0].windows, { id: "expired", label: "Expired", used: 15, reset: "2000-01-01T00:00:00Z" }],
+  }];
+  const css = generateCss(multiProviders);
+  const singleCss = generateCss([]);
+
+  for (const stylesheet of [css, singleCss]) {
+    for (const forbidden of [
+      "scroll-marker", "scroll-marker-group", "scroll-button",
+      "scroll-timeline", "timeline-scope", "scroll-state",
+      "if(style(", "> head", "head >", "head::",
+    ]) {
+      assert.equal(stylesheet.includes(forbidden), false, `Forbidden token found: ${forbidden}`);
+    }
+  }
+
+  let crashed = false;
+  page.on("crash", () => { crashed = true; });
+
   await page.goto("about:blank");
   await page.setViewportSize({ width: 1100, height: 780 });
   await page.setContent(`<!doctype html>
@@ -135,72 +153,87 @@ with patch("sinnoh.poketch_theme.read_providers", return_value=providers):
       </head>
       <body>
         <main data-slot="sidebar-inset" style="position:relative;z-index:0;min-height:100vh">
-          <div data-chat-canvas data-route="local"><textarea></textarea></div>
+          <div data-chat-canvas data-route="local">
+            <textarea id="draft"></textarea>
+            <button id="send" type="button">Send</button>
+          </div>
         </main>
         <aside aria-label="Other floating preview"
           style="position:fixed;right:0;bottom:0;width:320px;height:230px;z-index:48"></aside>
       </body>
     </html>`);
+
   await page.evaluate((css) => {
     const theme = new CSSStyleSheet();
     theme.replaceSync(css);
     document.adoptedStyleSheets = [theme];
   }, css);
-  const readout = () => page.evaluate(() => getComputedStyle(document.documentElement, "::after").content);
-  const housingVisibility = () => page.evaluate(() => getComputedStyle(document.documentElement, "::before").visibility);
-  const waitForReadout = (text) => page.waitForFunction(
-    (text) => getComputedStyle(document.documentElement, "::after").content.includes(text),
-    text, { timeout: 4_000 },
-  );
-  const clickPoint = async (control) => {
-    const { width, height } = page.viewportSize();
-    const size = await page.evaluate(
-      () => parseFloat(getComputedStyle(document.documentElement, "::before").width),
-    );
-    const scale = size / 240;
-    const coords = {
-      previous: [width - 14 - (240 - 222) * scale, height - 90 - (126 - 40) * scale],
-      next: [width - 14 - (240 - 222) * scale, height - 90 - (126 - 85) * scale],
-      lcd: [width - 14 - (240 - 106) * scale, height - 90 - (126 - 63) * scale],
-      hide: [width - 14 - 39 * scale, height - 90 - 123 * scale],
-      show: [width - 14 - 22, height - 90 - 12],
-    }[control];
-    await page.mouse.click(coords[0], coords[1]);
-  };
-  const click = async (control, expected) => {
-    await clickPoint(control);
-    await waitForReadout(expected);
-  };
-  assert.match(await readout(), /Codex, Weekly, 0% remaining/);
-  await page.locator("textarea").fill("Unsent draft");
-  await click("lcd", "Codex, Daily, 70% remaining");
-  await click("lcd", "Codex, Weekly, 0% remaining");
-  await click("previous", "Third, Weekly, 0% remaining");
-  await click("lcd", "Third, Daily, 70% remaining");
-  await click("lcd", "Third, Expired, Quota remaining unknown, Awaiting reset update");
-  await click("lcd", "Third, Weekly, 0% remaining");
-  await click("lcd", "Third, Daily, 70% remaining");
-  await click("next", "Codex, Weekly, 0% remaining");
-  await click("next", "Second, No quota window");
-  await click("next", "Third, Weekly, 0% remaining");
-  assert.equal(await page.locator("textarea").inputValue(), "Unsent draft");
 
+  const readout = () => page.evaluate(() => getComputedStyle(document.documentElement, "::after").content);
+  const housingStyle = () => page.evaluate(() => {
+    const before = getComputedStyle(document.documentElement, "::before");
+    const after = getComputedStyle(document.documentElement, "::after");
+    return {
+      beforePointer: before.pointerEvents,
+      afterPointer: after.pointerEvents,
+      beforeBg: before.backgroundImage,
+      afterBg: after.backgroundImage,
+      beforeContent: before.content,
+      afterContent: after.content,
+    };
+  });
+
+  const initial = await housingStyle();
+  assert.equal(initial.beforePointer, "none");
+  assert.equal(initial.afterPointer, "none");
+  assert.match(initial.beforeBg, /data:image\/svg\+xml/);
+  assert.match(initial.afterBg, /data:image\/svg\+xml/);
+  assert.match(initial.afterContent, /Codex, Weekly, 0% remaining/);
+
+  // Clicks over the Pokétch pass straight through to underlying UI.
+  await page.evaluate(() => {
+    window.__asideClicks = 0;
+    document.querySelector("aside").addEventListener("click", () => { window.__asideClicks += 1; });
+  });
+  await page.mouse.click(1100 - 14 - 120, 780 - 90 - 60);
+  assert.equal(await page.evaluate(() => window.__asideClicks), 1);
+
+  // Pressing Tab never focuses <head> or its metadata children.
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  });
+  const tabSequence = [];
+  for (let i = 0; i < 4; i += 1) {
+    await page.keyboard.press("Tab");
+    const active = await page.evaluate(() => document.activeElement?.tagName ?? null);
+    assert.ok(!["HEAD", "META", "TITLE", "LINK"].includes(active), `Unexpected head focus: ${active}`);
+    tabSequence.push(active);
+    if (active === "BUTTON") break;
+  }
+  assert.deepEqual(tabSequence.filter((tag) => tag !== "BODY"), ["TEXTAREA", "BUTTON"]);
+
+  await page.locator("#draft").fill("Unsent draft");
+
+  // Renders across chat routes and hides when sidebar-inset is inert.
   for (const route of ["remote", "draft", "local"]) {
     const result = await page.evaluate((route) => {
       const region = document.querySelector("[data-slot=sidebar-inset]");
       const canvas = document.createElement("div");
       canvas.dataset.chatCanvas = "";
       canvas.dataset.route = route;
+      canvas.innerHTML = '<textarea id="draft"></textarea><button id="send" type="button">Send</button>';
       region.replaceChildren(canvas);
       return getComputedStyle(document.documentElement, "::after").content;
     }, route);
-    assert.match(result, /Third, Weekly, 0% remaining/);
+    assert.match(result, /Codex, Weekly, 0% remaining/);
   }
   await page.locator("main").evaluate((element) => { element.inert = true; });
   assert.equal(await readout(), "none");
+  assert.equal((await housingStyle()).beforeContent, "none");
   await page.locator("main").evaluate((element) => { element.inert = false; });
-  assert.match(await readout(), /Third, Weekly, 0% remaining/);
+  assert.match(await readout(), /Codex, Weekly, 0% remaining/);
 
+  // Responsive scaling across compact, regular, and enlarged viewports.
   for (const [width, height, deviceWidth] of [[940, 640, 205.09], [1100, 780, 240], [1920, 1200, 320]]) {
     await page.setViewportSize({ width, height });
     const box = await page.evaluate(() => {
@@ -208,42 +241,85 @@ with patch("sinnoh.poketch_theme.read_providers", return_value=providers):
       return [width, height, right, bottom].map(parseFloat);
     });
     [deviceWidth, deviceWidth * 126 / 240, 14, 90].forEach((expected, index) => near(box[index], expected));
-    assert.match(await readout(), /Third, Weekly, 0% remaining/);
   }
+
+  // Auto-cycling across all 6 faces via @keyframes steps(1, end).
   await page.setViewportSize({ width: 1100, height: 780 });
-  await click("lcd", "Third, Daily, 70% remaining");
-  await page.evaluate((css) => {
-    document.adoptedStyleSheets[0].replaceSync(css.replaceAll("70% remaining", "69% remaining"));
-  }, css);
-  await waitForReadout("Third, Daily, 69% remaining");
-
-  // Collapse Pokétch: full housing hides, clicks pass through to underlying preview, and Show restores state.
-  await page.evaluate(() => {
-    window.__asideClicks = 0;
-    document.querySelector("aside").addEventListener("click", () => { window.__asideClicks += 1; });
+  const expectedFaces = [
+    { pos: "0px 0px", text: "Codex, Weekly, 0% remaining" },
+    { pos: "-186px 0px", text: "Codex, Daily, 70% remaining" },
+    { pos: "-372px 0px", text: "Second, No quota window" },
+    { pos: "-558px 0px", text: "Third, Weekly, 0% remaining" },
+    { pos: "-744px 0px", text: "Third, Daily, 70% remaining" },
+    { pos: "-930px 0px", text: "Third, Expired, Quota remaining unknown, Awaiting reset update" },
+  ];
+  const cycleFrames = await page.evaluate((count) => {
+    const anim = document.getAnimations().find((a) => a.animationName === "sinnoh-cycle");
+    if (!anim) return null;
+    const timing = anim.effect.getTiming();
+    const timingFn = getComputedStyle(document.documentElement, "::after").animationTimingFunction;
+    anim.pause();
+    const samples = [];
+    for (let i = 0; i < count; i += 1) {
+      anim.currentTime = (i + 0.5) * 5000;
+      const cs = getComputedStyle(document.documentElement, "::after");
+      samples.push({ pos: cs.backgroundPosition, content: cs.content });
+    }
+    return { duration: timing.duration, timingFn, samples };
+  }, expectedFaces.length);
+  assert.ok(cycleFrames, "Expected sinnoh-cycle animation");
+  assert.equal(cycleFrames.duration, expectedFaces.length * 5000);
+  assert.match(cycleFrames.timingFn, /^steps\(1(, end)?\)$/);
+  expectedFaces.forEach((expected, index) => {
+    assert.equal(cycleFrames.samples[index].pos, expected.pos);
+    assert.ok(cycleFrames.samples[index].content.includes(expected.text),
+      `Face ${index}: ${cycleFrames.samples[index].content}`);
   });
-  await clickPoint("hide");
-  await page.waitForFunction(() => getComputedStyle(document.documentElement, "::before").visibility === "hidden",
-    null, { timeout: 4_000 });
-  assert.equal(await housingVisibility(), "hidden");
-  await clickPoint("lcd");
-  assert.equal(await page.evaluate(() => window.__asideClicks), 1);
-  assert.match(await readout(), /Third, Daily, 69% remaining/);
-  await clickPoint("show");
-  await page.waitForFunction(() => getComputedStyle(document.documentElement, "::before").visibility === "visible",
-    null, { timeout: 4_000 });
-  assert.match(await readout(), /Third, Daily, 69% remaining/);
 
-  // Reversed <meta> tag order in <head> still keeps upper=Previous and lower=Next on wrap.
+  // Verify real-time playback advances from face 0 to face 1 automatically.
   await page.evaluate(() => {
-    const head = document.head;
-    const charset = head.querySelector("meta[charset]");
-    const viewport = head.querySelector('meta[name="viewport"]');
-    head.insertBefore(viewport, charset);
+    const anim = document.getAnimations().find((a) => a.animationName === "sinnoh-cycle");
+    anim.currentTime = 0;
+    anim.playbackRate = 25;
+    anim.play();
   });
-  await click("next", "Codex, Weekly, 0% remaining");
-  await click("previous", "Third, Weekly, 0% remaining");
+  await page.waitForFunction(
+    () => getComputedStyle(document.documentElement, "::after").content.includes("Codex, Daily, 70% remaining"),
+    null,
+    { timeout: 4_000 },
+  );
 
+  // Clearing and replacing adoptedStyleSheets + reading document.activeElement never crashes.
+  await page.locator("#draft").focus();
+  const sheetLifecycle = await page.evaluate(({ singleCss, updatedCss, fullCss }) => {
+    const sheet = document.adoptedStyleSheets[0];
+    const log = [];
+    sheet.replaceSync("");
+    log.push(document.activeElement?.tagName ?? null);
+    sheet.replaceSync(singleCss);
+    const singleAnim = getComputedStyle(document.documentElement, "::after").animationName;
+    const singleContent = getComputedStyle(document.documentElement, "::after").content;
+    log.push(document.activeElement?.tagName ?? null);
+    sheet.replaceSync(updatedCss);
+    const updatedContent = getComputedStyle(document.documentElement, "::after").content;
+    log.push(document.activeElement?.tagName ?? null);
+    sheet.replaceSync("");
+    log.push(document.activeElement?.tagName ?? null);
+    sheet.replaceSync(fullCss);
+    log.push(document.activeElement?.tagName ?? null);
+    return { log, singleAnim, singleContent, updatedContent };
+  }, {
+    singleCss,
+    updatedCss: css.replaceAll("70% remaining", "69% remaining"),
+    fullCss: css,
+  });
+  assert.equal(crashed, false);
+  assert.deepEqual(sheetLifecycle.log, ["TEXTAREA", "TEXTAREA", "TEXTAREA", "TEXTAREA", "TEXTAREA"]);
+  assert.equal(sheetLifecycle.singleAnim, "none");
+  assert.match(sheetLifecycle.singleContent, /Providers, No quota window, Quota remaining unknown/);
+  assert.match(sheetLifecycle.updatedContent, /Codex, Weekly, 0% remaining/);
+
+  // Legacy floating Browser suppression and independence from <head> metadata tags.
   const migration = await page.evaluate(() => {
     const canvas = document.querySelector("[data-chat-canvas]");
     canvas.innerHTML = '<section data-preview-mini-player="browser:legacy">Old panel</section>';
@@ -263,17 +339,17 @@ with patch("sinnoh.poketch_theme.read_providers", return_value=providers):
     floating.firstChild.setAttribute("src", "about:blank");
     const unrelated = [getComputedStyle(shell).visibility, getComputedStyle(floating).opacity,
       getComputedStyle(docked).opacity];
-    // Removing a required head host disarms the CSS Pokétch so the fallback panel is not hidden.
     floating.firstChild.setAttribute("src", url);
     document.head.querySelector('link[rel="apple-touch-icon"]').remove();
-    const degraded = [getComputedStyle(document.documentElement, "::after").content,
+    const stillActive = [getComputedStyle(document.documentElement, "::after").content !== "none",
       getComputedStyle(floating).opacity];
-    return { hidden, unrelated, degraded };
+    return { hidden, unrelated, stillActive };
   });
   assert.deepEqual(migration, {
     hidden: ["hidden", "0"],
     unrelated: ["visible", "1", "1"],
-    degraded: ["none", "1"],
+    stillActive: [true, "0"],
   });
-  console.log("Renderer-wide panel: instant routes, collapse toggle, native wrapping, scale, draft and legacy scope");
+  assert.equal(crashed, false);
+  console.log("Renderer-wide panel: auto-cycling faces, pass-through clicks, Tab safety, adoptedStyleSheets replaceSync stability, scale, inert and legacy scope");
 }

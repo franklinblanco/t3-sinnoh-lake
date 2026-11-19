@@ -18,22 +18,21 @@ The default T3 data directory is `~/.t3`. Set `T3CODE_HOME` or pass `--t3-home P
 
 ## Pokétch in chat
 
-Select **Sinnoh Rift · Lake Life** in **Settings → Appearance**. Pokétch appears as soon as T3 renders any existing chat or new draft, including chats on linked environments. It keeps the selected provider and quota window through thread switches. The panel hides on non-chat screens and when the T3 window is minimized or closed. Reloading T3 starts the panel at its default provider and quota window.
+Select **Sinnoh Rift · Lake Life** in **Settings → Appearance**. Pokétch appears as soon as T3 renders any existing chat or new draft, including chats on linked environments. It hides on non-chat screens and when the T3 window is minimized or closed. Clicks pass straight through the overlay to the chat beneath it (`pointer-events: none`), and it never enters Tab focus order.
 
 Pokétch floats 14 px from the right edge and 90 px from the bottom of the T3 viewport. Its reference size is 240 × 126 px at T3’s default window size. The whole device scales down in compact windows and up in larger ones.
 
 The update hides the old floating Pokétch when its tab is on the installed loopback URL. The tab remains available in the right panel and you can close it there. Docked tabs and other Browser pages retain their layout.
 
-The panel uses T3’s published theme CSS and Chromium’s native scrolling controls. It was tested in T3 Nightly `0.1.11-nightly.20261118.4890`. On a client that lacks the needed CSS features, open the installer’s loopback URL in the thread’s **Browser** and select **Float preview over chat**. [T3 theme CSS documentation](https://github.com/pingdotgg/t3code/blob/8cf97b5f06f30a872ce30ab8a888f2ff012365a2/docs/user/appearance.md#custom-css) · [Chromium scroll controls](https://developer.chrome.com/blog/new-in-web-ui-io-2025-recap)
+The in-chat overlay uses standard T3 theme CSS (`@keyframes` with `steps(1, end)`) and was tested in T3 Nightly `0.1.11-nightly.20261118.4890`. For manual interactive stepping, open the installer’s loopback URL in the thread’s docked **Browser** panel or in a regular browser tab. [T3 theme CSS documentation](https://github.com/pingdotgg/t3code/blob/8cf97b5f06f30a872ce30ab8a888f2ff012365a2/docs/user/appearance.md#custom-css)
 
 The worker reads the provider instance configuration and cached quota fields on the machine where it runs. It updates the displayed quota through the published theme, so a theme export or a client following that environment theme receives the display values. The standalone panel and its read-only quota endpoint bind to IPv4 loopback.
 
 ## Quota, context and local time
 
-- Press the upper or lower red rocker to cycle through every configured provider instance and any enabled built-ins present in T3’s cache.
-- Click the **−** tab on the top-right edge of the Pokétch to collapse it to a compact badge (letting clicks pass through the chat area underneath), and click the badge to restore it with your selected provider and window intact.
-- **LEFT** and the meter show remaining quota. The LCD starts on the tightest valid quota window for the selected provider. Click the LCD to cycle all reported windows. The theme uses the worker’s local time zone for reset times.
-- Expired quota values are hidden until T3 reports a new snapshot. Selecting an expired window shows **Awaiting reset update**. Unknown quota shows a dash. A valid exhausted window shows **0%** and an empty meter.
+- When multiple providers or quota windows are available, the in-chat Pokétch automatically cycles through every configured provider instance (and any enabled built-ins present in T3’s cache) and all reported quota windows every 5 seconds per face; when only one face is present, it stays static.
+- **LEFT** and the meter show remaining quota. Each provider begins on its tightest valid quota window before advancing through its remaining windows. The theme uses the worker’s local time zone for reset times.
+- Expired quota values are hidden until T3 reports a new snapshot, showing **Awaiting reset update**. Unknown quota shows a dash. A valid exhausted window shows **0%** and an empty meter.
 - Hover over the ring to the left of the composer’s model picker for the thread’s context percentage. Linked machines use the latest reading T3 Desktop received, including last-known data when a machine goes offline. The theme prioritizes recent and active threads within T3’s stylesheet size limit.
 - The solar clock checks the local zone once a minute and selects one of 18 animated WebP loops based on solar altitude at the zone’s representative city. T3 reloads the image from its watched theme directory.
 

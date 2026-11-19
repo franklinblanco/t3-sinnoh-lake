@@ -38,12 +38,46 @@ class PanelTest(unittest.TestCase):
             self.assertIn("72% of context used", css)
             self.assertIn(second, css)
             self.assertNotIn(first, css)
-            self.assertIn("--sinnoh-providers", css)
+            self.assertIn("--sinnoh-faces", css)
             self.assertNotIn("\\", css)
             self.assertEqual(css.count(context_meter.PANEL_START), 1)
 
+    def test_theme_css_has_no_scroll_controls_or_head_overrides(self):
+        forbidden = (
+            "scroll-marker",
+            "scroll-marker-group",
+            "scroll-button",
+            "scroll-timeline",
+            "timeline-scope",
+            "scroll-state",
+            "if(style(",
+            "> head",
+            "head >",
+            "head::",
+            "meta[",
+            "link[",
+        )
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            single_css = poketch_theme.styles(root, 47984)
+            self.assertIn("--sinnoh-faces: 1;", single_css)
+            self.assertIn("animation: none;", single_css)
+            self.assertNotIn("@keyframes sinnoh-cycle", single_css)
+            for token in forbidden:
+                self.assertNotIn(token, single_css)
+
+            fixture(root)
+            multi_css = poketch_theme.styles(root, 47984)
+            self.assertIn("@keyframes sinnoh-cycle", multi_css)
+            self.assertIn("steps(1, end) infinite;", multi_css)
+            self.assertIn("pointer-events: none;", multi_css)
+            self.assertNotIn("\\", multi_css)
+            for token in forbidden:
+                self.assertNotIn(token, multi_css)
+
     def test_copy_tree_prunes_stale_files_and_appledouble_artifacts(self):
         import install
+        from sinnoh.paths import ASSETS
 
         with TemporaryDirectory() as temp:
             source = Path(temp) / "src"
@@ -64,6 +98,13 @@ class PanelTest(unittest.TestCase):
             self.assertFalse((dest / "._keep.py").exists())
             self.assertFalse((dest / "old_dir").exists())
             self.assertTrue((dest / "__pycache__" / "keep.cpython-313.pyc").is_file())
+
+            poketch_dest = Path(temp) / "poketch"
+            poketch_dest.mkdir()
+            (poketch_dest / "mini.svg").write_text("<svg/>", encoding="utf-8")
+            install.copy_tree(ASSETS / "poketch", poketch_dest)
+            self.assertFalse((ASSETS / "poketch" / "mini.svg").exists())
+            self.assertFalse((poketch_dest / "mini.svg").exists())
 
     def test_only_same_origin_requests_get_quota_fields(self):
         with TemporaryDirectory() as temp:
@@ -139,10 +180,10 @@ class PanelTest(unittest.TestCase):
                     css = ""
                     while monotonic() < until and worker.poll() is None:
                         css = json.loads((themes / "sinnoh-lake-life.json").read_text()).get("css", "")
-                        if "--sinnoh-providers" in css and panel_ready(port):
+                        if "--sinnoh-faces" in css and panel_ready(port):
                             break
                         sleep(0.1)
-                    self.assertIn("--sinnoh-providers", css)
+                    self.assertIn("--sinnoh-faces", css)
                     self.assertTrue((themes / "sinnoh-lake-life.webp").is_file())
                     self.assertTrue(panel_ready(port))
                     self.assertIsNone(worker.poll())
