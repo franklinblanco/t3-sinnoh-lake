@@ -9,7 +9,7 @@ Use Python 3.11–3.14 with `venv`, `pip` and Git. Run the installer as the sign
 | Desktop | Install command | Startup and migration |
 | --- | --- | --- |
 | Windows 10/11 | `py -3.12 install.py --keep-theme` | Task Scheduler runs the background worker in the current user’s interactive session. The installer verifies the owner and action of the existing **T3 Sinnoh Lake** task before restarting it with the new launcher. |
-| Linux | `python3 install.py --keep-theme` | The existing XDG autostart entry is reused. The installer stops the previous process matching the installed launcher and starts the background worker. The same panel works on X11 and Wayland. |
+| Linux | `python3 install.py --keep-theme` | A per-user `systemd` service (`t3-sinnoh-lake.service`) keeps the background worker running outside the installer’s shell cgroup and restarts it on failure, archiving any owned legacy XDG autostart `.desktop` entry. On systems without `systemd --user`, the installer falls back to XDG autostart. The same panel works on X11 and Wayland. |
 | macOS | `python3 install.py --keep-theme` | A per-user LaunchAgent starts the background worker. Once it responds, the installer stops the old clock and floating overlay jobs and archives their plists under the install directory’s `legacy/`. The old bundle stays on disk for rollback. |
 
 On a fresh install, omit `--keep-theme` to select **Sinnoh Rift · Lake Life** through `t3 theme set`. If the CLI is unavailable, select it in **Settings → Appearance**. The static **Sinnoh Rift** variant is also available. Existing theme definitions and custom CSS are kept.

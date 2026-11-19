@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import plistlib
 import select
+import shutil
 import signal
 import socket
 import subprocess
@@ -18,6 +19,7 @@ from .paths import atomic_write
 MAC_PANEL = "local.t3code.sinnoh-lake-panel"
 MAC_CLOCK = "local.t3code.sinnoh-lake-clock"
 MAC_OVERLAY = "local.t3code.sinnoh-usage"
+LINUX_SERVICE = "t3-sinnoh-lake.service"
 TASK = r"\T3 Sinnoh Lake"
 TASK_XML = "{http://schemas.microsoft.com/windows/2004/02/mit/task}"
 
@@ -130,6 +132,38 @@ def desktop_arg(value):
     return '"' + quoted.replace("\\", "\\\\") + '"'
 
 
+def systemd_arg(value):
+    # systemd ExecStart expands % specifiers and $ variables inside double quotes.
+    text = str(value).replace("%", "%%").replace("$", "$$")
+    escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def systemd_user_available():
+    if not shutil.which("systemctl"):
+        return False
+    return subprocess.run(
+        ["systemctl", "--user", "show-environment"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    ).returncode == 0
+
+
+def linux_service_unit(python, launcher):
+    exec_start = "ExecStart=" + " ".join(map(systemd_arg, (python, launcher)))
+    return (
+        "[Unit]\n"
+        "Description=T3 Sinnoh Lake\n"
+        "After=default.target\n\n"
+        "[Service]\n"
+        "Type=simple\n"
+        f"{exec_start}\n"
+        "Restart=on-failure\n"
+        "RestartSec=15\n\n"
+        "[Install]\n"
+        "WantedBy=default.target\n"
+    )
+
+
 def linux_stop(command):
     expected = [os.fsencode(arg) for arg in command]
     for process in Path("/proc").iterdir():
@@ -161,13 +195,36 @@ def linux_start(directory, python, port):
     launcher = directory / "launch.py"
     command = [str(python), str(launcher)]
     exec_line = "Exec=" + " ".join(map(desktop_arg, command))
-    path = conf / "autostart" / "t3-sinnoh-lake.desktop"
-    if path.is_file():
-        if exec_line not in path.read_text(encoding="utf-8").splitlines():
-            raise RuntimeError(f"Unrecognized startup entry at {path}. Inspect its Exec command.")
+    desktop_path = conf / "autostart" / "t3-sinnoh-lake.desktop"
+    if systemd_user_available():
+        exec_start = "ExecStart=" + " ".join(map(systemd_arg, command))
+        service_path = conf / "systemd" / "user" / LINUX_SERVICE
+        unit = linux_service_unit(python, launcher).encode("utf-8")
+        if service_path.is_file():
+            if exec_start not in service_path.read_text(encoding="utf-8").splitlines():
+                raise RuntimeError(
+                    f"Unrecognized startup entry at {service_path}. Inspect its ExecStart command."
+                )
+        if not service_path.is_file() or service_path.read_bytes() != unit:
+            atomic_write(service_path, unit)
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+        subprocess.run(["systemctl", "--user", "stop", LINUX_SERVICE],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        linux_stop(command)
+        subprocess.run(["systemctl", "--user", "enable", LINUX_SERVICE], check=True)
+        subprocess.run(["systemctl", "--user", "restart", LINUX_SERVICE], check=True)
+        wait_for_panel(port, directory)
+        if desktop_path.is_file() and exec_line in desktop_path.read_text(encoding="utf-8").splitlines():
+            backup = directory / "legacy" / str(time_ns())
+            backup.mkdir(parents=True)
+            desktop_path.rename(backup / desktop_path.name)
+        return
+    if desktop_path.is_file():
+        if exec_line not in desktop_path.read_text(encoding="utf-8").splitlines():
+            raise RuntimeError(f"Unrecognized startup entry at {desktop_path}. Inspect its Exec command.")
     else:
         desktop = "[Desktop Entry]\nType=Application\nName=T3 Sinnoh Lake\n" + exec_line + "\n"
-        atomic_write(path, desktop.encode())
+        atomic_write(desktop_path, desktop.encode())
     linux_stop(command)
     subprocess.Popen(command, start_new_session=True, stdin=subprocess.DEVNULL,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

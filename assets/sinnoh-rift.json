@@ -4,5 +4,5 @@
   "appearance": "dark",
   "canvas": "#161a2e",
   "accent": "#c1b6f0",
-  "css": "[data-workspace-area=\"conversation\"] { background: linear-gradient(90deg, rgba(12,15,31,.40), rgba(12,15,31,.60) 35%, rgba(12,15,31,.60) 65%, rgba(12,15,31,.40)), var(--theme-background-image) center / cover no-repeat, #161a2e !important; }\n.messages-timeline-scroll { background-color: transparent !important; }"
+  "css": "[data-workspace-area=\"conversation\"] { background: linear-gradient(90deg, rgba(12,15,31,.40), rgba(12,15,31,.60) 35%, rgba(12,15,31,.60) 65%, rgba(12,15,31,.40)), var(--theme-background-image) center / cover no-repeat, #161a2e !important; }\n.messages-timeline-scroll, [data-workspace-area=\"conversation\"] [data-timeline-loading] { background-color: transparent !important; }"
 }

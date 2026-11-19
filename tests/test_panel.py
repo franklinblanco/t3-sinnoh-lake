@@ -12,9 +12,20 @@ from time import monotonic, sleep
 import unittest
 from unittest.mock import patch
 
-from sinnoh import context_meter, poketch_theme
+from sinnoh import context_meter, poketch_theme, startup
 from sinnoh.panel import HOST, PANEL_PATH, USAGE_PATH, PanelServer
-from sinnoh.startup import check_port, linux_stop, panel_ready, windows_task, windows_task_owned
+from sinnoh.startup import (
+    LINUX_SERVICE,
+    check_port,
+    desktop_arg,
+    linux_service_unit,
+    linux_start,
+    linux_stop,
+    panel_ready,
+    systemd_arg,
+    windows_task,
+    windows_task_owned,
+)
 from test_sinnoh import fixture
 
 
@@ -233,3 +244,107 @@ class LinuxMigrationTest(unittest.TestCase):
                     for worker in (legacy, unrelated):
                         if worker.poll() is None:
                             worker.terminate()
+
+    def test_systemd_unit_escapes_paths_and_migrates_legacy_autostart(self):
+        self.assertEqual(
+            systemd_arg('/tmp/a b/%foo/$bar/"q"\\z'),
+            '"/tmp/a b/%%foo/$$bar/\\"q\\"\\\\z"',
+        )
+        with TemporaryDirectory() as temp:
+            base = Path(temp)
+            conf = base / "config"
+            directory = base / "install"
+            directory.mkdir()
+            python = directory / ".venv/bin/python"
+            launcher = directory / "launch.py"
+            exec_line = "Exec=" + " ".join(map(desktop_arg, (python, launcher)))
+            desktop = conf / "autostart/t3-sinnoh-lake.desktop"
+            desktop.parent.mkdir(parents=True)
+            desktop.write_text(
+                "[Desktop Entry]\nType=Application\nName=T3 Sinnoh Lake\n" + exec_line + "\n",
+                encoding="utf-8",
+            )
+            calls = []
+
+            def fake_run(cmd, **_kwargs):
+                calls.append(cmd)
+                return subprocess.CompletedProcess(cmd, 0)
+
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(conf)}), \
+                 patch.object(startup, "systemd_user_available", return_value=True), \
+                 patch.object(startup, "linux_stop") as stop_mock, \
+                 patch.object(startup, "wait_for_panel") as wait_mock, \
+                 patch("sinnoh.startup.subprocess.run", side_effect=fake_run):
+                linux_start(directory, python, 47984)
+
+            service = conf / "systemd/user" / LINUX_SERVICE
+            self.assertEqual(service.read_text(encoding="utf-8"), linux_service_unit(python, launcher))
+            self.assertEqual(calls, [
+                ["systemctl", "--user", "daemon-reload"],
+                ["systemctl", "--user", "stop", LINUX_SERVICE],
+                ["systemctl", "--user", "enable", LINUX_SERVICE],
+                ["systemctl", "--user", "restart", LINUX_SERVICE],
+            ])
+            stop_mock.assert_called_once_with([str(python), str(launcher)])
+            wait_mock.assert_called_once_with(47984, directory)
+            self.assertFalse(desktop.exists())
+            archived = list((directory / "legacy").glob("*/t3-sinnoh-lake.desktop"))
+            self.assertEqual(len(archived), 1)
+
+            service.write_text("[Service]\nExecStart=/bin/false\n", encoding="utf-8")
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(conf)}), \
+                 patch.object(startup, "systemd_user_available", return_value=True), \
+                 self.assertRaises(RuntimeError):
+                linux_start(directory, python, 47984)
+
+    def test_falls_back_to_xdg_autostart_without_systemd_user(self):
+        with TemporaryDirectory() as temp:
+            base = Path(temp)
+            conf = base / "config"
+            directory = base / "install"
+            directory.mkdir()
+            python = directory / ".venv/bin/python"
+            launcher = directory / "launch.py"
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(conf)}), \
+                 patch.object(startup, "systemd_user_available", return_value=False), \
+                 patch.object(startup, "linux_stop") as stop_mock, \
+                 patch.object(startup, "wait_for_panel") as wait_mock, \
+                 patch("sinnoh.startup.subprocess.Popen") as popen_mock:
+                linux_start(directory, python, 47984)
+            desktop = conf / "autostart/t3-sinnoh-lake.desktop"
+            self.assertTrue(desktop.is_file())
+            self.assertFalse((conf / "systemd/user" / LINUX_SERVICE).exists())
+            stop_mock.assert_called_once_with([str(python), str(launcher)])
+            popen_mock.assert_called_once()
+            wait_mock.assert_called_once_with(47984, directory)
+
+
+class ThemeUpgradeTest(unittest.TestCase):
+    def test_shipped_themes_and_upgrade_make_draft_timeline_transparent(self):
+        import install
+        from sinnoh.paths import ASSETS
+
+        for name in ("sinnoh-lake-life.json", "sinnoh-rift.json"):
+            css = json.loads((ASSETS / name).read_text(encoding="utf-8"))["css"]
+            self.assertIn('[data-workspace-area="conversation"] [data-timeline-loading]', css)
+            self.assertNotIn("\\", css)
+
+        with TemporaryDirectory() as temp:
+            theme = Path(temp) / "sinnoh-lake-life.json"
+            legacy_css = (
+                '[data-workspace-area="conversation"] { background: #161a2e !important; }\n'
+                + install.LEGACY_SCROLL_RULE
+                + "\nbody { color: rebeccapurple; }"
+            )
+            theme.write_text(json.dumps({"css": legacy_css}), encoding="utf-8")
+            install.upgrade_theme_css(theme)
+            upgraded = json.loads(theme.read_text(encoding="utf-8"))["css"]
+            self.assertIn(install.TRANSPARENT_TIMELINE_RULE, upgraded)
+            self.assertIn("body { color: rebeccapurple; }", upgraded)
+            self.assertNotIn(install.LEGACY_SCROLL_RULE, upgraded)
+
+            custom = Path(temp) / "custom.json"
+            custom_data = json.dumps({"css": "body { color: teal; }"})
+            custom.write_text(custom_data, encoding="utf-8")
+            install.upgrade_theme_css(custom)
+            self.assertEqual(custom.read_text(encoding="utf-8"), custom_data)

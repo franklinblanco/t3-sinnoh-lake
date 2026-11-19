@@ -53,6 +53,28 @@ def copy_tree(source, dest):
                 pass
 
 
+LEGACY_SCROLL_RULE = ".messages-timeline-scroll { background-color: transparent !important; }"
+TRANSPARENT_TIMELINE_RULE = (
+    '.messages-timeline-scroll, [data-workspace-area="conversation"] [data-timeline-loading]'
+    " { background-color: transparent !important; }"
+)
+
+
+def upgrade_theme_css(target):
+    try:
+        theme = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if not isinstance(theme, dict):
+        return
+    css = theme.get("css")
+    if (isinstance(css, str)
+            and LEGACY_SCROLL_RULE in css
+            and "[data-timeline-loading]" not in css):
+        theme["css"] = css.replace(LEGACY_SCROLL_RULE, TRANSPARENT_TIMELINE_RULE, 1)
+        write_atomic(target, (json.dumps(theme, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
+
+
 def install_theme(directory, root, python):
     themes = root / "userdata" / "themes"
     for pattern in ("sinnoh-rift.*", f"{THEME_ID}.json"):
@@ -60,6 +82,8 @@ def install_theme(directory, root, python):
             target = themes / source.name
             if not target.exists():
                 write_atomic(target, source.read_bytes())
+            elif target.suffix == ".json":
+                upgrade_theme_css(target)
     subprocess.run([python, "-m", "sinnoh.solar"], cwd=directory, check=True)
 
 
