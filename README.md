@@ -6,7 +6,7 @@ Sinnoh Rift · Lake Life brings an animated autumn pixel-art lake to the T3 Code
 
 ## Inside T3 Code
 
-![T3 Code running Sinnoh Rift · Lake Life with mock sessions, live animated lake, floating Pokétch, and composer context meter](docs/t3-workspace-preview.webp)
+![Live recording of T3 Code running Sinnoh Rift · Lake Life with animated lake, floating Pokétch controls, and composer context meter](docs/t3-workspace-preview.webp)
 
 ## Living Sinnoh Lake & Solar Phases
 
